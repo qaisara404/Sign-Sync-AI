@@ -1,0 +1,1798 @@
+<!DOCTYPE html>
+<html lang="en" class="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SignSync AI | Malaysian Sign Language (BIM) Platform</title>
+
+  <!-- Tailwind CSS & FontAwesome -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+
+  <!-- MediaPipe Hands for Real-Time Camera Hand Tracking -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50: '#eef2ff', 100: '#e0e7ff', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca', 900: '#312e81' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Keep all four language modes on the same responsive grid and prevent Tamil text overflow. */
+    [lang="ta"], [lang="ta"] body { font-family: "Noto Sans Tamil", "Latha", "Arial Unicode MS", sans-serif; }
+    #appBody, #appBody * { overflow-wrap: anywhere; }
+    button, input, select { min-width: 0; }
+    .bim-learning-card { display: flex; flex-direction: column; }
+    .bim-learning-card > * { min-width: 0; }
+    #quickReplyButtons button { max-width: 100%; white-space: normal; text-align: start; line-height: 1.45; }
+    #bimSequenceOutput > div { min-width: 0; }
+    #bimSequenceOutput p { overflow-wrap: anywhere; }
+    /* Decorative surfaces stay still; ONLY BIM learning cards get hover motion/glow. */
+    .neon-card { position: relative; }
+    .bim-learning-card {
+      min-height: 270px;
+      height: 100%;
+      transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.28s ease, border-color 0.28s ease;
+      background-image: radial-gradient(circle at top right, rgba(99, 102, 241, 0.08), transparent 60%),
+                        radial-gradient(circle at bottom left, rgba(245, 158, 11, 0.06), transparent 60%);
+    }
+    .bim-learning-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 16px 30px -10px rgba(99, 102, 241, 0.30), 0 0 18px -4px rgba(56, 189, 248, 0.24);
+      border-color: rgba(99, 102, 241, 0.7) !important;
+    }
+    .dark .bim-learning-card {
+      background-image: radial-gradient(circle at top right, rgba(99, 102, 241, 0.16), transparent 60%),
+                        radial-gradient(circle at bottom left, rgba(251, 191, 36, 0.10), transparent 60%);
+    }
+    .dark .bim-learning-card:hover {
+      box-shadow: 0 18px 34px -10px rgba(99, 102, 241, 0.42), 0 0 22px -4px rgba(251, 191, 36, 0.28);
+      border-color: rgba(251, 191, 36, 0.75) !important;
+    }
+    #bimCardsGrid { align-items: stretch; }
+    #bimCardsGrid > article { min-width: 0; }
+    @media (prefers-reduced-motion: reduce) {
+      .bim-learning-card { transition: none; }
+      .bim-learning-card:hover { transform: none; }
+    }
+
+    /* High Contrast Accessibility Mode */
+    .high-contrast {
+      background-color: #000000 !important;
+      color: #ffff00 !important;
+    }
+    .high-contrast .card-bg {
+      background-color: #0a0a0a !important;
+      border: 2px solid #ffff00 !important;
+      color: #ffff00 !important;
+      background-image: none !important;
+    }
+    .high-contrast button, .high-contrast select, .high-contrast input {
+      border: 2px solid #ffff00 !important;
+    }
+
+    /* Deaf Visual Screen Flash Alert */
+    @keyframes flashAlert {
+      0%, 100% { box-shadow: inset 0 0 0 0 rgba(99, 102, 241, 0); }
+      50% { box-shadow: inset 0 0 0 10px rgba(250, 204, 21, 0.85); }
+    }
+    .visual-flash {
+      animation: flashAlert 0.55s ease-in-out 2;
+    }
+
+    /* Active Microphone Pulse */
+    @keyframes pulseMic {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.08); }
+    }
+    .mic-active {
+      animation: pulseMic 1s infinite ease-in-out;
+      background-color: #e11d48 !important;
+    }
+
+    /* Toast Notification Slide Animation */
+    @keyframes toastSlideIn {
+      from { transform: translateY(-20px) scale(0.95); opacity: 0; }
+      to { transform: translateY(0) scale(1); opacity: 1; }
+    }
+    .toast-enter {
+      animation: toastSlideIn 0.3s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+  </style>
+</head>
+<body id="appBody" class="bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 min-h-screen transition-colors duration-300 font-sans">
+
+  <!-- FLOATING POP-UP TOAST NOTIFICATION CONTAINER -->
+  <div id="toastContainer" class="fixed top-5 right-5 z-[100] flex flex-col gap-2.5 max-w-sm w-full pointer-events-none px-4 sm:px-0"></div>
+
+  <!-- TOP NAVIGATION BAR -->
+  <header class="sticky top-0 z-40 bg-white/95 dark:bg-slate-800/95 backdrop-blur border-b border-slate-200 dark:border-slate-700 card-bg">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+
+      <!-- Brand Logo -->
+      <div class="flex items-center gap-3">
+        <div class="w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-600 to-amber-500 flex items-center justify-center text-white text-xl font-bold shadow-md">
+          <i class="fa-solid fa-hands-asl-interpreting"></i>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="font-extrabold text-xl tracking-tight">SignSync <span class="text-indigo-600 dark:text-amber-400">AI</span></h1>
+            <span class="text-[11px] font-bold uppercase px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 border border-amber-300">i3EC'26</span>
+          </div>
+          <p id="subHeader" class="text-xs text-slate-500 dark:text-slate-400">AI-Assisted Malaysian Sign Language (BIM) Platform • KPTM Alor Setar</p>
+        </div>
+      </div>
+
+      <!-- Controls: Language, Accessibility, Theme, User Auth -->
+      <div class="flex items-center gap-2 flex-wrap">
+
+        <!-- 4-Language Switcher -->
+        <select id="langSelect" onchange="changeLanguage(this.value)" aria-label="Select Language" class="text-xs font-semibold rounded-lg px-2.5 py-2 bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 focus:outline-none cursor-pointer">
+          <option value="en">🇬🇧 English</option>
+          <option value="bm">🇲🇾 Bahasa Melayu</option>
+          <option value="zh">🇨🇳 中文 (华语)</option>
+          <option value="ta">🇲🇾 தமிழ் (Tamil)</option>
+        </select>
+
+        <!-- Inclusive Accessibility Button -->
+        <button onclick="toggleModal('a11yModal')" class="text-xs font-semibold px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700 hover:bg-indigo-100 flex items-center gap-1.5 transition" title="Accessibility Settings">
+          <i class="fa-solid fa-universal-access text-base"></i>
+          <span id="btnA11y">Accessibility</span>
+        </button>
+
+        <!-- Theme Toggle -->
+        <button onclick="toggleTheme()" class="p-2 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-amber-300 transition" title="Toggle Dark/Light Mode">
+          <i id="themeIcon" class="fa-solid fa-moon"></i>
+        </button>
+
+        <!-- Sign Up / Login Account Button -->
+        <button id="authNavBtn" onclick="handleAuthButtonClick()" class="text-xs font-semibold px-3.5 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-700 hover:to-indigo-600 text-white flex items-center gap-1.5 shadow-sm transition">
+          <i class="fa-solid fa-user-plus" id="authNavIcon"></i>
+          <span id="authStatusText">Sign Up / Login</span>
+        </button>
+
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN CONTENT CONTAINER -->
+  <main class="max-w-6xl mx-auto px-4 py-6 transition-all">
+
+    <!-- HERO / SDG 4 BANNER -->
+    <div class="neon-card mb-6 p-5 rounded-2xl bg-gradient-to-r from-indigo-900 via-indigo-800 to-slate-900 text-white shadow-lg flex flex-col md:flex-row items-center justify-between gap-4 border border-indigo-500/30 card-bg">
+      <div>
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 text-amber-300 text-xs font-semibold mb-2">
+          <i class="fa-solid fa-graduation-cap"></i> <span id="sdgBadge">Supporting UN SDG 4: Quality & Inclusive Education</span>
+        </div>
+        <h2 id="heroTitle" class="text-2xl md:text-3xl font-extrabold">From BIM Learning to Real-Time Conversation</h2>
+        <p id="heroDesc" class="text-sm text-indigo-100 mt-1 max-w-2xl">Bridging the communication gap between the Deaf community and the general public in Malaysia through accessible AI technology.</p>
+      </div>
+      <div class="flex items-center justify-center gap-5 bg-white/10 px-5 py-3 rounded-xl border border-white/15 shrink-0">
+        <div class="text-center">
+          <div class="text-xl font-extrabold text-emerald-400">Live AI</div>
+          <div id="stat2Label" class="text-[11px] text-indigo-200">Hand Tracking</div>
+        </div>
+        <div class="h-8 w-px bg-white/20"></div>
+        <div class="text-center">
+          <div class="text-xl font-extrabold text-sky-400">2-Way</div>
+          <div id="stat3Label" class="text-[11px] text-indigo-200">Voice & Sign</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- NAVIGATION TABS (3 CORE MODULES) -->
+    <div class="grid grid-cols-3 gap-2 mb-6 bg-slate-200/70 dark:bg-slate-800 p-1.5 rounded-xl card-bg">
+      <button onclick="switchTab('learn')" id="tabBtn-learn" class="tab-btn py-2.5 px-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 bg-white dark:bg-slate-700 text-indigo-600 dark:text-amber-400 shadow-sm">
+        <i class="fa-solid fa-book-open-reader"></i> <span id="tabLearn">1. Learn BIM</span>
+      </button>
+      <button onclick="switchTab('practice')" id="tabBtn-practice" class="tab-btn py-2.5 px-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 text-slate-600 dark:text-slate-300 hover:bg-white/50">
+        <i class="fa-solid fa-camera-retro"></i> <span id="tabPractice">2. AI Gesture Practice</span>
+      </button>
+      <button onclick="switchTab('communicate')" id="tabBtn-communicate" class="tab-btn py-2.5 px-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 text-slate-600 dark:text-slate-300 hover:bg-white/50">
+        <i class="fa-solid fa-comments"></i> <span id="tabComm">3. 2-Way Communication</span>
+      </button>
+    </div>
+
+    <!-- ================= TAB 1: LEARN BIM (9 CARDS PER PAGE IN A 3 × 3 GRID) ================= -->
+    <section id="tab-learn" class="space-y-5">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div>
+          <h3 id="learnHeading" class="text-lg font-bold">Interactive BIM Learning Modules</h3>
+          <p id="learnSub" class="text-xs text-slate-500 dark:text-slate-400">Explore Alphabets, Numbers, Greetings, and Daily Life Vocabulary in Malaysian Sign Language (BIM).</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border border-emerald-300/50">
+            <i class="fa-solid fa-circle-check text-emerald-600 mr-1"></i> <span id="progressLabel">Mastered:</span> <span id="progressCount">0</span> <span id="signsLabel">Signs</span>
+          </span>
+        </div>
+      </div>
+
+      <!-- Category Filter Pills & Search -->
+      <div class="neon-card flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white dark:bg-slate-800 p-3 rounded-xl border border-slate-200 dark:border-slate-700 card-bg">
+        <div class="flex flex-wrap gap-1.5">
+          <button onclick="filterCategory('all')" id="cat-all" class="cat-btn text-xs font-bold px-3 py-1.5 rounded-lg bg-indigo-600 text-white shadow-sm">All (27)</button>
+          <button onclick="filterCategory('alphabet')" id="cat-alphabet" class="cat-btn text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-indigo-50">🔤 Alphabets</button>
+          <button onclick="filterCategory('number')" id="cat-number" class="cat-btn text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-indigo-50">🔢 Numbers</button>
+          <button onclick="filterCategory('daily')" id="cat-daily" class="cat-btn text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-indigo-50">🏠 Daily Life</button>
+          <button onclick="filterCategory('emergency')" id="cat-emergency" class="cat-btn text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-indigo-50">🏥 Emergency</button>
+        </div>
+        <div class="relative">
+          <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-xs text-slate-400"></i>
+          <input id="searchBIM" oninput="handleSearchInput()" type="text" placeholder="Search BIM sign..." class="w-full sm:w-52 pl-8 pr-3 py-1.5 text-xs rounded-lg bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 focus:outline-none" />
+        </div>
+      </div>
+
+      <!-- 3 Cards Grid (3 Cards Per Page) -->
+      <div id="bimCardsGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 pt-1">
+        <!-- Dynamically populated by JS (9 cards per page) -->
+      </div>
+
+      <!-- 1 to 9 Numbered Pagination Bar (9 cards per page) -->
+      <div class="neon-card flex flex-col sm:flex-row items-center justify-between gap-3 bg-white dark:bg-slate-800 px-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm card-bg">
+        <div class="text-xs font-semibold text-slate-500 dark:text-slate-400">
+          <span id="pageInfoText">Showing page 1 of 3 (up to 9 cards per page • 27 total)</span>
+        </div>
+        <div id="paginationControls" class="flex items-center gap-1.5 flex-wrap justify-center">
+          <!-- Populated by JS: Prev, 1, 2, 3, 4, 5, 6, 7, 8, 9, Next -->
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= TAB 2: AI GESTURE PRACTICE (LIVE INTERACTIVE CAMERA) ================= -->
+    <section id="tab-practice" class="hidden space-y-6">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- Left: Live Camera & MediaPipe Hand Skeleton -->
+        <div class="neon-card lg:col-span-7 bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700 card-bg">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div class="flex items-center gap-2">
+              <span id="camDot" class="w-3 h-3 rounded-full bg-amber-500 animate-pulse"></span>
+              <h3 class="font-bold text-base" id="camTitle">Interactive AI Hand-Landmark Scanner</h3>
+            </div>
+            <div class="flex gap-2">
+              <button id="btnStartCam" onclick="toggleWebcam()" class="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 shadow-sm">
+                <i class="fa-solid fa-video"></i> <span id="btnCamText">Start Live Camera</span>
+              </button>
+              <button onclick="simulateSignDetection()" class="text-xs bg-amber-500 hover:bg-amber-600 text-slate-900 px-3 py-1.5 rounded-lg font-bold shadow-sm">
+                <i class="fa-solid fa-wand-magic-sparkles mr-1"></i> <span id="btnSimText">Test AI Match</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Camera Viewport + Canvas Overlay -->
+          <div class="relative w-full h-80 sm:h-96 bg-slate-950 rounded-xl overflow-hidden flex items-center justify-center border-2 border-indigo-500/40">
+            <video id="webcamVideo" autoplay playsinline muted class="hidden w-full h-full object-cover transform -scale-x-100"></video>
+            <canvas id="outputCanvas" class="hidden absolute inset-0 w-full h-full object-cover transform -scale-x-100 pointer-events-none"></canvas>
+
+            <!-- Placeholder View before camera starts -->
+            <div id="camPlaceholder" class="text-center p-6 max-w-md">
+              <div class="w-20 h-20 mx-auto mb-3 rounded-2xl bg-indigo-500/20 border-2 border-dashed border-emerald-400 flex items-center justify-center text-4xl text-emerald-400">
+                <i id="simHandIcon" class="fa-solid fa-hand-sparkles"></i>
+              </div>
+              <p class="text-white font-bold text-sm" id="camStatusText">Real-Time Hand & Finger Tracking Ready</p>
+              <p class="text-slate-400 text-xs mt-1" id="camSubText">Click "Start Live Camera" and show your hand! The AI tracks up to two hands and draws 21 landmark points for each visible hand.</p>
+            </div>
+
+            <!-- Top Live Hand Status Pill -->
+            <div class="absolute top-3 left-3 bg-slate-900/85 backdrop-blur px-3 py-1.5 rounded-lg border border-slate-700 text-xs text-white flex items-center gap-2">
+              <i class="fa-solid fa-hand text-emerald-400"></i>
+              <span id="liveGestureBadge">Hand Status: Waiting for camera...</span>
+            </div>
+
+            <!-- Bottom Live AI Overlay HUD -->
+            <div class="absolute bottom-3 left-3 right-3 bg-slate-900/90 backdrop-blur px-3.5 py-2.5 rounded-lg border border-slate-700 flex flex-wrap items-center justify-between gap-2 text-xs text-white">
+              <div>
+                <span class="text-slate-400" id="hudTargetLabel">Target BIM Sign:</span>
+                <strong id="hudTarget" class="text-amber-400 ml-1">TERIMA KASIH (Thank You)</strong>
+              </div>
+              <div class="flex items-center gap-3">
+                <span><span class="text-slate-400" id="hudDetectedLabel">Detected:</span> <strong id="hudDetectedPose" class="text-sky-400">--</strong></span>
+                <span><span class="text-slate-400" id="hudAccLabel">Accuracy:</span> <strong id="hudConfidence" class="text-emerald-400">96.5%</strong></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: AI Coaching Feedback -->
+        <div class="neon-card lg:col-span-5 bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col justify-between card-bg">
+          <div>
+            <h3 class="font-bold text-base mb-1" id="coachTitle">AI Gesture Coach Feedback</h3>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mb-4" id="coachSub">Select any BIM sign below and practice in front of the camera for real-time posture evaluation.</p>
+
+            <label class="block text-xs font-bold uppercase text-slate-500 mb-1" id="selectTargetLabel">Select Target BIM Sign:</label>
+            <select id="practiceSelect" onchange="updatePracticeTarget(this.value)" class="w-full rounded-xl p-2.5 text-sm font-semibold bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 mb-4">
+              <option value="TERIMA KASIH">🙏 Terima Kasih (Open Palm / Thank You)</option>
+              <option value="KHABAR BAIK">👍 Khabar Baik (Thumbs Up / Good)</option>
+              <option value="SAYA / NOMBOR 1">☝️ Saya / Nombor 1 (Index Pointing)</option>
+              <option value="HURUF B / NOMBOR 5">🖐️ Huruf B / Nombor 5 (Open 5 Fingers)</option>
+              <option value="HURUF A / SAYA BOLEH">✊ Huruf A / Boleh (Closed Fist)</option>
+              <option value="TOLONG SAYA">🆘 Tolong Saya (Help Me)</option>
+            </select>
+
+            <!-- How to Perform Box -->
+            <div class="neon-card p-3.5 rounded-xl bg-slate-100 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 mb-4 text-xs">
+              <div class="font-bold text-indigo-600 dark:text-amber-400 uppercase mb-1"><i class="fa-solid fa-lightbulb mr-1"></i> <span id="howToPerformTitle">How to Perform (BIM Guide):</span></div>
+              <p id="targetGuideText" class="text-slate-700 dark:text-slate-200">Extend all 5 fingers openly, touch your chin with your fingertips, and move your hand slightly forward.</p>
+            </div>
+
+            <!-- Live AI Feedback Box -->
+            <div id="aiFeedbackBox" class="neon-card p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-emerald-700 dark:text-emerald-300 uppercase"><i class="fa-solid fa-circle-check mr-1"></i> <span id="liveAnalysisTitle">Live AI Posture Analysis</span></span>
+                <span id="scoreBadge" class="text-xs font-extrabold px-2 py-0.5 rounded bg-emerald-600 text-white">Ready</span>
+              </div>
+              <p id="aiFeedbackText" class="text-xs text-slate-700 dark:text-slate-200 leading-relaxed">
+                Open the camera and raise your hand. Our AI can track both left and right hands, showing 21 landmarks per detected hand. Recognition is a prototype and may not identify every BIM sign accurately.
+              </p>
+            </div>
+          </div>
+
+          <div class="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs text-slate-500">
+            <span><i class="fa-solid fa-microchip mr-1"></i> Engine: MediaPipe Hands + BIM Classifier</span>
+            <span class="text-emerald-600 dark:text-emerald-400 font-semibold">Real-Time Active</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ================= TAB 3: 2-WAY COMMUNICATION (LIVE VOICE & SIGN) ================= -->
+    <section id="tab-communicate" class="hidden space-y-6">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        <!-- Hearing Person -> Deaf Person (Speech/Text to BIM Sign) -->
+        <div class="neon-card bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700 card-bg">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <span class="text-xs font-bold uppercase px-2.5 py-1 rounded bg-indigo-100 text-indigo-800 dark:bg-indigo-900/50 dark:text-indigo-300">
+              <i class="fa-solid fa-microphone-lines mr-1"></i> <span id="commHearingBadge">Hearing User (Speech / Text → BIM)</span>
+            </span>
+            <button id="voiceMicBtn" onclick="toggleRealVoiceInput()" class="text-xs px-3 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-600 text-white font-semibold flex items-center gap-1.5 shadow-sm">
+              <i class="fa-solid fa-microphone"></i> <span id="voiceBtnText">Tap & Speak (Live Mic)</span>
+            </button>
+          </div>
+
+          <p id="micStatusHint" class="text-[11px] text-slate-500 dark:text-slate-400 mb-2">Type below or click "Tap & Speak" to use your device's microphone.</p>
+
+          <div class="flex gap-2 mb-4">
+            <input id="speechInput" type="text" oninput="translateToBIM()" placeholder="Type or speak e.g. 'Selamat pagi terima kasih'" class="flex-1 rounded-xl px-3.5 py-2.5 text-sm bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 focus:outline-none" value="Selamat pagi, terima kasih apa khabar?" />
+            <button onclick="translateToBIM()" class="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm">
+              <span id="btnTranslate">Translate</span>
+            </button>
+          </div>
+
+          <!-- BIM Visual Sequence Output -->
+          <div class="p-4 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+            <div class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-2.5" id="seqOutputTitle">Generated BIM Visual Sign Sequence:</div>
+            <div id="bimSequenceOutput" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <!-- Populated dynamically with neon cards -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Deaf Person -> Hearing Person (BIM Sign to Speech/Text) -->
+        <div class="neon-card bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700 card-bg">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <span class="text-xs font-bold uppercase px-2.5 py-1 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300">
+              <i class="fa-solid fa-hands mr-1"></i> <span id="commDeafBadge">Deaf User (BIM Gesture → Voice / Text)</span>
+            </span>
+            <button onclick="speakTranslatedText()" class="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold flex items-center gap-1.5 shadow-sm">
+              <i class="fa-solid fa-volume-high"></i> <span id="btnSpeakAloud">Speak Aloud (TTS)</span>
+            </button>
+          </div>
+
+          <p id="deafTapHint" class="text-xs text-slate-500 dark:text-slate-400 mb-3">Tap BIM sign phrases below to build a sentence and speak it aloud to a hearing person:</p>
+
+          <!-- Quick Sign Buttons -->
+          <div id="quickReplyButtons" class="flex flex-wrap gap-2 mb-4">
+            <!-- Populated by JS according to selected language -->
+          </div>
+
+          <!-- Output Box -->
+          <div class="neon-card p-4 rounded-xl bg-indigo-50 dark:bg-slate-900 border border-indigo-200 dark:border-slate-700 min-h-[125px] flex flex-col justify-between">
+            <div>
+              <div class="text-[11px] font-bold uppercase text-indigo-500 mb-1" id="spokenOutputLabel">Natural Spoken Output (For Hearing Listener):</div>
+              <p id="deafReplyOutput" class="text-base font-bold text-slate-800 dark:text-white">Hai, saya berkomunikasi menggunakan Bahasa Isyarat Malaysia (BIM). Khabar baik, terima kasih!</p>
+            </div>
+            <div class="flex justify-end mt-2">
+              <button onclick="document.getElementById('deafReplyOutput').innerText=''" class="text-xs text-rose-500 font-semibold hover:underline" id="btnClearMsg">Clear Message</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="max-w-6xl mx-auto px-4 py-6 mt-8 border-t border-slate-200 dark:border-slate-800 text-center text-xs text-slate-500">
+    <p><strong>SIGNSYNC AI</strong> • Developed by <strong>Qaisara Bahira binti Baharuddin & Nur Nadirah binti Harun</strong></p>
+  </footer>
+
+  <!-- ================= MODAL 1: INCLUSIVE ACCESSIBILITY SETTINGS ================= -->
+  <div id="a11yModal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="neon-card bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 card-bg">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-extrabold text-lg flex items-center gap-2">
+          <i class="fa-solid fa-universal-access text-indigo-600"></i> <span id="a11yModalTitle">Accessibility Settings</span>
+        </h3>
+        <button onclick="toggleModal('a11yModal')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-xl"></i></button>
+      </div>
+
+      <div class="space-y-4 text-sm">
+        <!-- Font Size -->
+        <div class="flex items-center justify-between p-3 rounded-xl bg-slate-100 dark:bg-slate-700/60">
+          <div>
+            <div class="font-bold" id="a11yTextSizeTitle">Text Size Scaling</div>
+            <div class="text-xs text-slate-500" id="a11yTextSizeSub">Adjust text size for comfortable reading</div>
+          </div>
+          <div class="flex gap-1">
+            <button onclick="setFontScale('100%')" class="px-2.5 py-1 rounded bg-white dark:bg-slate-600 font-bold text-xs">A</button>
+            <button onclick="setFontScale('112%')" class="px-2.5 py-1 rounded bg-white dark:bg-slate-600 font-bold text-sm">A+</button>
+            <button onclick="setFontScale('125%')" class="px-2.5 py-1 rounded bg-indigo-600 text-white font-bold text-base">A++</button>
+          </div>
+        </div>
+
+        <!-- High Contrast -->
+        <div class="flex items-center justify-between p-3 rounded-xl bg-slate-100 dark:bg-slate-700/60">
+          <div>
+            <div class="font-bold" id="a11yContrastTitle">High-Contrast Display</div>
+            <div class="text-xs text-slate-500" id="a11yContrastSub">Enhanced yellow-on-black visual contrast</div>
+          </div>
+          <button onclick="toggleHighContrast()" class="px-3 py-1.5 rounded-lg bg-slate-800 text-amber-300 font-bold text-xs">Toggle</button>
+        </div>
+
+        <!-- Visual Flash Alert -->
+        <div class="flex items-center justify-between p-3 rounded-xl bg-slate-100 dark:bg-slate-700/60">
+          <div>
+            <div class="font-bold" id="a11yFlashTitle">Visual Screen Flash Alert</div>
+            <div class="text-xs text-slate-500" id="a11yFlashSub">Flashes screen border lightly for visual notifications</div>
+          </div>
+          <input type="checkbox" id="visualFlashToggle" checked class="w-5 h-5 accent-indigo-600" />
+        </div>
+      </div>
+
+      <button onclick="toggleModal('a11yModal')" class="mt-5 w-full py-2.5 rounded-xl bg-indigo-600 text-white font-bold text-sm" id="a11ySaveBtn">Save & Close</button>
+    </div>
+  </div>
+
+  <!-- ================= MODAL 2: SIGN UP FIRST -> POPUP -> REDIRECT TO LOGIN ================= -->
+  <div id="authModal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="neon-card bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 card-bg">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2.5">
+          <div class="w-9 h-9 rounded-xl bg-indigo-600/10 dark:bg-amber-400/10 flex items-center justify-center text-indigo-600 dark:text-amber-400 text-lg">
+            <i class="fa-solid fa-user-shield"></i>
+          </div>
+          <div>
+            <h3 class="font-extrabold text-base leading-tight" id="authModalTitle">SignSync AI Account Portal</h3>
+            <p class="text-[11px] text-slate-500 dark:text-slate-400" id="authModalSub">Create your account first, then sign in</p>
+          </div>
+        </div>
+        <button onclick="toggleModal('authModal')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-xl"></i></button>
+      </div>
+
+      <!-- Step Switcher: 1. Sign Up (Default First) | 2. Login -->
+      <div class="grid grid-cols-2 gap-2 p-1 bg-slate-100 dark:bg-slate-700 rounded-xl mb-4">
+        <button id="tabRegisterBtn" onclick="switchAuthTab('register')" class="py-2 rounded-lg font-bold text-xs bg-white dark:bg-slate-800 text-indigo-600 dark:text-amber-400 shadow-sm transition">
+          <i class="fa-solid fa-user-plus mr-1"></i> <span id="tabSignUpText">1. Sign Up</span>
+        </button>
+        <button id="tabLoginBtn" onclick="switchAuthTab('login')" class="py-2 rounded-lg font-bold text-xs text-slate-500 dark:text-slate-300 transition">
+          <i class="fa-solid fa-right-to-bracket mr-1"></i> <span id="tabLoginText">2. Login</span>
+        </button>
+      </div>
+
+      <!-- STEP 1: REGISTER / SIGN UP FORM (SHOWN FIRST BY DEFAULT) -->
+      <form id="registerForm" onsubmit="handleRegister(event)" class="space-y-3 text-sm">
+        <div>
+          <label class="block text-xs font-bold uppercase text-slate-500 dark:text-slate-400 mb-1" id="lblRegName">Full Name</label>
+          <div class="relative">
+            <i class="fa-solid fa-user absolute left-3.5 top-3 text-slate-400 text-xs"></i>
+            <input id="regName" type="text" required placeholder="Qaisara Bahira" class="w-full rounded-xl pl-9 pr-3 py-2.5 text-sm bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 focus:border-indigo-500 focus:outline-none" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase text-slate-500 dark:text-slate-400 mb-1" id="lblRegEmail">Email Address</label>
+          <div class="relative">
+            <i class="fa-solid fa-envelope absolute left-3.5 top-3 text-slate-400 text-xs"></i>
+            <input id="regEmail" type="email" required placeholder="qaisara@kptm.edu.my" class="w-full rounded-xl pl-9 pr-3 py-2.5 text-sm bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 focus:border-indigo-500 focus:outline-none" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase text-slate-500 dark:text-slate-400 mb-1" id="lblRegRole">User Profile Role</label>
+          <select id="regRole" class="w-full rounded-xl p-2.5 text-sm bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 focus:outline-none">
+            <option value="Student / Public">General Public / Student Learner</option>
+            <option value="Deaf Community">Deaf Community Member</option>
+            <option value="Educator / Family">Educator / Family Member</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase text-slate-500 dark:text-slate-400 mb-1" id="lblRegPass">Create Password</label>
+          <div class="relative">
+            <i class="fa-solid fa-lock absolute left-3.5 top-3 text-slate-400 text-xs"></i>
+            <input id="regPass" type="password" required minlength="4" placeholder="Minimum 4 characters" class="w-full rounded-xl pl-9 pr-3 py-2.5 text-sm bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 focus:border-indigo-500 focus:outline-none" />
+          </div>
+        </div>
+        <button type="submit" class="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-700 hover:to-teal-600 text-white font-bold text-sm mt-2 shadow-md transition flex items-center justify-center gap-2">
+          <i class="fa-solid fa-paper-plane"></i> <span id="btnCreateAccText">Create Free Account</span>
+        </button>
+        <p class="text-center text-xs text-slate-500 pt-1">
+          <span id="alreadyHaveAccText">Already registered?</span>
+          <button type="button" onclick="switchAuthTab('login')" class="text-indigo-600 dark:text-amber-400 font-bold hover:underline ml-1" id="linkGoLogin">Go to Login →</button>
+        </p>
+      </form>
+
+      <!-- STEP 2: LOGIN FORM (REDIRECTED HERE AFTER SIGN UP WITH AUTO-FILLED EMAIL) -->
+      <form id="loginForm" onsubmit="handleLogin(event)" class="hidden space-y-3 text-sm">
+        <!-- Green Registration Success Banner inside Login Modal -->
+        <div id="signupSuccessBanner" class="hidden p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200 text-xs flex items-start gap-2.5">
+          <i class="fa-solid fa-circle-check text-emerald-600 text-base mt-0.5"></i>
+          <div>
+            <div class="font-extrabold" id="bannerSuccessTitle">Account Created Successfully!</div>
+            <div id="bannerSuccessSub">Your email has been filled in below. Please enter your password to log in.</div>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold uppercase text-slate-500 dark:text-slate-400 mb-1" id="lblLoginEmail">Registered Email</label>
+          <div class="relative">
+            <i class="fa-solid fa-envelope absolute left-3.5 top-3 text-slate-400 text-xs"></i>
+            <input id="loginEmail" type="email" required placeholder="qaisara@kptm.edu.my" class="w-full rounded-xl pl-9 pr-3 py-2.5 text-sm bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 focus:border-indigo-500 focus:outline-none" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase text-slate-500 dark:text-slate-400 mb-1" id="lblLoginPass">Password</label>
+          <div class="relative">
+            <i class="fa-solid fa-key absolute left-3.5 top-3 text-slate-400 text-xs"></i>
+            <input id="loginPass" type="password" required placeholder="••••••••" class="w-full rounded-xl pl-9 pr-3 py-2.5 text-sm bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 focus:border-indigo-500 focus:outline-none" />
+          </div>
+        </div>
+        <button type="submit" class="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-700 hover:to-indigo-600 text-white font-bold text-sm mt-2 shadow-md transition flex items-center justify-center gap-2">
+          <i class="fa-solid fa-right-to-bracket"></i> <span id="btnSignInText">Log In to SignSync AI</span>
+        </button>
+        <p class="text-center text-xs text-slate-500 pt-1">
+          <span id="needAccText">Don't have an account yet?</span>
+          <button type="button" onclick="switchAuthTab('register')" class="text-indigo-600 dark:text-amber-400 font-bold hover:underline ml-1" id="linkGoSignUp">← Back to Sign Up</button>
+        </p>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= MODAL 3: BIM CARD DETAIL & PRACTICE VIEW ================= -->
+  <div id="cardDetailModal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="neon-card bg-white dark:bg-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 card-bg">
+      <div class="flex items-center justify-between mb-3">
+        <span id="modalCatBadge" class="text-xs font-bold uppercase px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-700">Category</span>
+        <button onclick="toggleModal('cardDetailModal')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-xl"></i></button>
+      </div>
+      <div class="flex items-center gap-4 mb-4">
+        <div class="w-16 h-16 rounded-2xl bg-indigo-600/10 dark:bg-amber-400/10 flex items-center justify-center text-3xl text-indigo-600 dark:text-amber-400">
+          <i id="modalIcon" class="fa-solid fa-hands"></i>
+        </div>
+        <div>
+          <h3 id="modalWord" class="text-xl font-extrabold">Word</h3>
+          <p id="modalTrans" class="text-sm font-semibold text-indigo-600 dark:text-amber-400">Translation</p>
+        </div>
+      </div>
+      <div class="p-3.5 rounded-xl bg-slate-100 dark:bg-slate-700/60 text-xs leading-relaxed mb-4">
+        <div class="font-bold uppercase text-slate-400 mb-1" id="modalStepHeader">Step-by-Step BIM Hand Gesture:</div>
+        <p id="modalDesc" class="text-slate-700 dark:text-slate-200 text-sm"></p>
+      </div>
+      <div class="flex gap-2">
+        <button id="modalMarkBtn" class="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs">
+          <i class="fa-solid fa-check mr-1"></i> Mark as Mastered
+        </button>
+        <button onclick="toggleModal('cardDetailModal'); switchTab('practice');" class="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs">
+          <i class="fa-solid fa-camera mr-1"></i> Practice with AI
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- JAVASCRIPT LOGIC -->
+  <script>
+    // ================= 1. BIM LEARNING DATA (27 CARDS, 9 PER PAGE) =================
+    // Every single card has accurate Multilingual Titles AND Descriptions in BM, EN, ZH (Mandarin), and TA (Tamil)
+    const bimData = [
+      // PAGE 1: Alphabets Part 1 (Cards 1 - 3)
+      {
+        id: 1, catKey: "alphabet", icon: "fa-a",
+        word: "Huruf A", en: "Letter A", zh: "字母 A", ta: "எழுத்து A",
+        desc: {
+          en: "Close all four fingers into a neat fist with your thumb resting vertically alongside the index finger.",
+          bm: "Genggam keempat-empat jari dengan kemas dan letakkan ibu jari tegak di sisi jari telunjuk.",
+          zh: "将四个手指握成整齐的拳头，大拇指垂直靠在食指外侧。",
+          ta: "நான்கு விரல்களையும் மடக்கி मुट्ठी பிடித்து, கட்டைவிரலை ஆள்காட்டி விரலின் பக்கவாட்டில் நேராக வைக்கவும்."
+        }
+      },
+      {
+        id: 2, catKey: "alphabet", icon: "fa-b",
+        word: "Huruf B", en: "Letter B", zh: "字母 B", ta: "எழுத்து B",
+        desc: {
+          en: "Hold your dominant hand upright with all four fingers straight and together, folding your thumb across your palm.",
+          bm: "Tegakkan tapak tangan dengan empat jari rapat lurus ke atas, manakala ibu jari dilipat merentasi tapak tangan.",
+          zh: "手掌竖直向上，四指并拢伸直，大拇指弯曲贴在手掌心。",
+          ta: "நான்கு விரல்களையும் நேராகச் சேர்த்து உயர்த்தி, கட்டைவிரலை உள்ளங்கையின் குறுக்கே மடக்கவும்."
+        }
+      },
+      {
+        id: 3, catKey: "alphabet", icon: "fa-c",
+        word: "Huruf C", en: "Letter C", zh: "字母 C", ta: "எழுத்து C",
+        desc: {
+          en: "Curve your fingers and thumb together evenly to form the shape of the letter 'C'.",
+          bm: "Lengkungkan kesemua jari bersama ibu jari supaya membentuk lengkungan huruf 'C'.",
+          zh: "将四指与大拇指自然弯曲，摆出英文字母“C”的形状。",
+          ta: "விரல்களையும் கட்டைவிரலையும் வளைத்து ஆங்கில எழுத்து 'C' வடிவத்தை உருவாக்கவும்."
+        }
+      },
+
+      // PAGE 2: Alphabets Part 2 (Cards 4 - 6)
+      {
+        id: 4, catKey: "alphabet", icon: "fa-d",
+        word: "Huruf D", en: "Letter D", zh: "字母 D", ta: "எழுத்து D",
+        desc: {
+          en: "Point your index finger straight up while touching the tips of your middle, ring, and little fingers to your thumb.",
+          bm: "Luruskan jari telunjuk ke atas sambil menemukan hujung jari hantu, manis, dan kelingking dengan ibu jari.",
+          zh: "食指笔直向上伸出，中指、无名指和小指指尖与大拇指相触成环。",
+          ta: "ஆள்காட்டி விரலை நேராக உயர்த்தி, மற்ற மூன்று விரல்களின் நுனிகளை கட்டைவிரலுடன் இணைக்கவும்."
+        }
+      },
+      {
+        id: 5, catKey: "alphabet", icon: "fa-e",
+        word: "Huruf E", en: "Letter E", zh: "字母 E", ta: "எழுத்து E",
+        desc: {
+          en: "Curl all four fingers down slightly so their tips rest gently against the top edge of your folded thumb.",
+          bm: "Bengkokkan keempat-empat jari ke bawah sehingga hujung jari menyentuh bahagian atas ibu jari yang dilipat.",
+          zh: "四指弯曲收拢，指尖轻轻抵住向内折叠的大拇指上方。",
+          ta: "நான்கு விரல்களையும் மடக்கி, அவற்றின் நுனிகள் மடக்கிய கட்டைவிரலின் மேல் படுமாறு வைக்கவும்."
+        }
+      },
+      {
+        id: 6, catKey: "alphabet", icon: "fa-f",
+        word: "Huruf F", en: "Letter F", zh: "字母 F", ta: "எழுத்து F",
+        desc: {
+          en: "Touch your index fingertip to your thumb to form a small circle, while extending the other three fingers straight up.",
+          bm: "Temukan hujung jari telunjuk dan ibu jari membentuk bulatan kecil, sambil meluruskan tiga jari lain ke atas.",
+          zh: "食指与大拇指指尖相触成圆圈，其余三根手指伸直向上。",
+          ta: "ஆள்காட்டி விரல் நுனியை கட்டைவிரலுடன் இணைத்து வட்டமாக்கி, மற்ற மூன்று விரல்களை நேராக உயர்த்தவும்."
+        }
+      },
+
+      // PAGE 3: Alphabets Part 3 (Cards 7 - 9)
+      {
+        id: 7, catKey: "alphabet", icon: "fa-i",
+        word: "Huruf I", en: "Letter I", zh: "字母 I", ta: "எழுத்து I",
+        desc: {
+          en: "Make a neat fist and extend only your little (pinky) finger straight upward.",
+          bm: "Genggam tangan dengan kemas dan luruskan jari kelingking sahaja tegak ke atas.",
+          zh: "握拳并将小拇指单独垂直向上伸直。",
+          ta: "மற்ற விரல்களை மடக்கி, சுண்டு விரலை மட்டும் நேராக மேல்நோக்கி உயர்த்தவும்."
+        }
+      },
+      {
+        id: 8, catKey: "alphabet", icon: "fa-l",
+        word: "Huruf L", en: "Letter L", zh: "字母 L", ta: "எழுத்து L",
+        desc: {
+          en: "Extend your index finger straight up and your thumb straight out to form a 90-degree 'L' shape.",
+          bm: "Luruskan jari telunjuk ke atas dan ibu jari ke tepi membentuk sudut 90 darjah seperti huruf 'L'.",
+          zh: "食指向上伸直，大拇指向侧伸出，形成90度的“L”字形。",
+          ta: "ஆள்காட்டி விரலை நேராகவும் கட்டைவிரலை பக்கவாட்டிலும் நீட்டி 'L' வடிவத்தை உருவாக்கவும்."
+        }
+      },
+      {
+        id: 9, catKey: "alphabet", icon: "fa-y",
+        word: "Huruf Y", en: "Letter Y", zh: "字母 Y", ta: "எழுத்து Y",
+        desc: {
+          en: "Extend your thumb and little finger outward while curling the three middle fingers into your palm.",
+          bm: "Buka ibu jari dan jari kelingking ke luar sambil melipat tiga jari tengah ke dalam tapak tangan.",
+          zh: "伸出大拇指和小拇指，中间三根手指弯曲贴于掌心。",
+          ta: "கட்டைவிரல் மற்றும் சுண்டு விரலை நீட்டி, நடுவில் உள்ள மூன்று விரல்களை உள்ளங்கையில் மடக்கவும்."
+        }
+      },
+
+      // PAGE 4: Numbers Part 1 (Cards 10 - 12)
+      {
+        id: 10, catKey: "number", icon: "fa-1",
+        word: "Nombor 1", en: "Number 1", zh: "数字 1", ta: "எண் 1",
+        desc: {
+          en: "Raise your index finger straight up while keeping all other fingers folded into your palm.",
+          bm: "Angkat jari telunjuk lurus ke atas sambil melipat jari-jari lain ke dalam tapak tangan.",
+          zh: "将食指单独向上伸直，其余手指收拢于掌心。",
+          ta: "ஆள்காட்டி விரலை மட்டும் நேராக உயர்த்தி, மற்ற விரல்களை மடக்கி வைக்கவும்."
+        }
+      },
+      {
+        id: 11, catKey: "number", icon: "fa-2",
+        word: "Nombor 2", en: "Number 2", zh: "数字 2", ta: "எண் 2",
+        desc: {
+          en: "Raise your index and middle fingers in a 'V' shape with your palm facing forward.",
+          bm: "Angkat jari telunjuk dan jari hantu membentuk huruf 'V' dengan tapak tangan menghadap ke hadapan.",
+          zh: "掌心朝前，伸出食指与中指呈“V”字形。",
+          ta: "உள்ளங்கை முன்னோக்கி இருக்குமாறு ஆள்காட்டி மற்றும் நடுவிரலை 'V' வடிவத்தில் உயர்த்தவும்."
+        }
+      },
+      {
+        id: 12, catKey: "number", icon: "fa-3",
+        word: "Nombor 3", en: "Number 3", zh: "数字 3", ta: "எண் 3",
+        desc: {
+          en: "Extend your thumb, index, and middle fingers upward while folding down your ring and little fingers.",
+          bm: "Luruskan ibu jari, jari telunjuk, dan jari hantu ke atas sambil melipat jari manis serta kelingking.",
+          zh: "伸出大拇指、食指和中指，将无名指与小指弯曲收起。",
+          ta: "கட்டைவிரல், ஆள்காட்டி விரல் மற்றும் நடுவிரலை நீட்டி, மற்ற இரு விரல்களை மடக்கவும்."
+        }
+      },
+
+      // PAGE 5: Numbers Part 2 (Cards 13 - 15)
+      {
+        id: 13, catKey: "number", icon: "fa-4",
+        word: "Nombor 4", en: "Number 4", zh: "数字 4", ta: "எண் 4",
+        desc: {
+          en: "Extend four fingers (index, middle, ring, little) straight up while folding the thumb across the palm.",
+          bm: "Luruskan empat jari (telunjuk hingga kelingking) ke atas dan lipat ibu jari ke dalam tapak tangan.",
+          zh: "四根手指（食指至小指）向上伸直张开，大拇指弯曲贴于掌心。",
+          ta: "நான்கு விரல்களை நேராக உயர்த்தி, கட்டைவிரலை உள்ளங்கையில் மடக்கி வைக்கவும்."
+        }
+      },
+      {
+        id: 14, catKey: "number", icon: "fa-5",
+        word: "Nombor 5", en: "Number 5", zh: "数字 5", ta: "எண் 5",
+        desc: {
+          en: "Open your hand completely with all five fingers spread apart clearly.",
+          bm: "Buka tapak tangan sepenuhnya dengan kelima-lima jari diregangkan dengan jelas.",
+          zh: "五指完全张开，手掌自然朝前展示。",
+          ta: "ஐந்து விரல்களையும் நன்றாக விரித்து உள்ளங்கையைத் திறந்து காட்டவும்."
+        }
+      },
+      {
+        id: 15, catKey: "number", icon: "fa-thumbs-up",
+        word: "Nombor 10", en: "Number 10", zh: "数字 10", ta: "எண் 10",
+        desc: {
+          en: "Make a fist with your thumb extended upward and gently shake your wrist side to side.",
+          bm: "Genggam tangan dengan ibu jari tegak ke atas, kemudian goyangkan pergelangan tangan sedikit ke kiri dan kanan.",
+          zh: "握拳并竖起大拇指，手腕轻轻左右摆动两次。",
+          ta: "கட்டைவிரலை உயர்த்தி முஷ்டி பிடித்து, மணிக்கட்டை மெதுவாக அசைக்கவும்."
+        }
+      },
+
+      // PAGE 6: Daily Conversation Part 1 (Cards 16 - 18)
+      {
+        id: 16, catKey: "daily", icon: "fa-hand-holding-heart",
+        word: "Terima Kasih", en: "Thank You", zh: "谢谢", ta: "நன்றி",
+        desc: {
+          en: "Touch your chin with the fingertips of your open flat right hand, then move your hand forward toward the person.",
+          bm: "Sentuh dagu dengan hujung jari tangan kanan yang terbuka rata, kemudian gerakkan tangan ke hadapan.",
+          zh: "右手五指并拢伸直，指尖轻触下巴后向前方平推致意。",
+          ta: "வலது கையின் விரல் நுனிகளால் முகவாயைத் தொட்டு, கையை முன்னோக்கி நகர்த்தவும்."
+        }
+      },
+      {
+        id: 17, catKey: "daily", icon: "fa-hands-clapping",
+        word: "Apa Khabar", en: "How Are You?", zh: "你好吗？", ta: "நலமா?",
+        desc: {
+          en: "Place both hands near your chest, rotate them outward, and finish with a friendly thumbs-up gesture.",
+          bm: "Letakkan kedua-dua tangan di dada, pusingkan ke luar dan akhiri dengan isyarat bagus (ibu jari ke atas).",
+          zh: "双手置于胸前向外翻转，最后竖起大拇指表示问候。",
+          ta: "இரு கைகளையும் மார்பின் அருகே வைத்து வெளிப்புறமாகத் திருப்பி, கட்டைவிரலை உயர்த்திக் காட்டவும்."
+        }
+      },
+      {
+        id: 18, catKey: "daily", icon: "fa-sun",
+        word: "Selamat Pagi", en: "Good Morning", zh: "早上好", ta: "காலை வணக்கம்",
+        desc: {
+          en: "Sign 'Selamat' by crossing hands over chest, then raise your dominant forearm upward like the rising morning sun.",
+          bm: "Silangkan tangan di dada untuk 'Selamat', kemudian angkat lengan kanan ke atas seperti matahari terbit.",
+          zh: "双手在胸前交叉表示平安，随后右前臂向上抬起象征朝阳升起。",
+          ta: "மார்பின் குறுக்கே கைகளை வைத்து, காலை சூரியன் உதிப்பது போல் கையை உயர்த்தவும்."
+        }
+      },
+
+      // PAGE 7: Daily Conversation Part 2 (Cards 19 - 21)
+      {
+        id: 19, catKey: "daily", icon: "fa-utensils",
+        word: "Makan & Minum", en: "Eat & Drink", zh: "吃饭与喝水", ta: "சாப்பிடு & குடி",
+        desc: {
+          en: "Bring your right fingertips together and tap near your mouth for 'Eat', or tilt a C-shaped hand to your lips for 'Drink'.",
+          bm: "Rapatkan hujung jari kanan dan hala ke mulut untuk 'Makan', atau condongkan tangan bentuk 'C' ke bibir untuk 'Minum'.",
+          zh: "五指捏合轻点嘴部表示“吃饭”，手呈C形向嘴边倾斜表示“喝水”。",
+          ta: "விரல் நுனிகளைச் சேர்த்து வாயருகே கொண்டு சென்றால் 'சாப்பிடு', 'C' வடிவ கையை சாய்த்தால் 'குடி'."
+        }
+      },
+      {
+        id: 20, catKey: "daily", icon: "fa-user-group",
+        word: "Keluarga & Kawan", en: "Family & Friend", zh: "家人与朋友", ta: "குடும்பம் & நண்பர்",
+        desc: {
+          en: "Interlock both index fingers twice to sign 'Friend', or form 'F' hands and circle outward for 'Family'.",
+          bm: "Kaitkan kedua-dua jari telunjuk dua kali untuk 'Kawan', atau buat huruf 'F' kedua-dua tangan dalam bulatan untuk 'Keluarga'.",
+          zh: "双食指互相勾连两次代表“朋友”，双手呈F形画圈合拢代表“家人”。",
+          ta: "இரு ஆள்காட்டி விரல்களை ஒன்றோடொன்று கோர்த்தால் 'நண்பர்', வட்டமாக இணைத்தால் 'குடும்பம்'."
+        }
+      },
+      {
+        id: 21, catKey: "daily", icon: "fa-tags",
+        word: "Berapa Harga?", en: "How Much Price?", zh: "多少钱？", ta: "விலை என்ன?",
+        desc: {
+          en: "Rub your thumb against your index and middle fingers (money gesture) followed by an open questioning palm.",
+          bm: "Gosok ibu jari pada jari telunjuk dan jari hantu (isyarat wang) diikuti tapak tangan terbuka bertanya.",
+          zh: "大拇指与食指、中指摩擦做出钱币手势，随后摊开手掌表示询问价格。",
+          ta: "கட்டைவிரலை ஆள்காட்டி விரலுடன் தேய்த்து விட்டு உள்ளங்கையைத் திறந்து விலையைக் கேட்கவும்."
+        }
+      },
+
+      // PAGE 8: Daily & Identity Part 3 (Cards 22 - 24)
+      {
+        id: 22, catKey: "daily", icon: "fa-face-smile",
+        word: "Minta Maaf", en: "I Am Sorry", zh: "对不起 / 抱歉", ta: "மன்னிக்கவும்",
+        desc: {
+          en: "Place a closed fist (with thumb out) over the center of your chest and rub in a gentle circular motion.",
+          bm: "Letakkan genggaman tangan di tengah dada dan gerakkan dalam bulatan kecil dengan sopan.",
+          zh: "右手握拳置于胸口正中央，顺时针轻轻画圈表示歉意。",
+          ta: "வலது கையை மடக்கி மார்பின் நடுவே வைத்து மெதுவாக வட்ட வடிவில் தேய்க்கவும்."
+        }
+      },
+      {
+        id: 23, catKey: "daily", icon: "fa-graduation-cap",
+        word: "Belajar BIM", en: "Learn Sign Language", zh: "学习手语", ta: "சைகை மொழி கற்க",
+        desc: {
+          en: "Place your right fingertips on your open left palm, then lift your right hand up to your forehead.",
+          bm: "Letakkan hujung jari tangan kanan di atas tapak tangan kiri, kemudian angkat ke arah dahi.",
+          zh: "右手从张开的左手掌心汲取知识般向上移至前额，象征学习。",
+          ta: "இடது உள்ளங்கையில் இருந்து வலது விரல்களை நெற்றியை நோக்கி உயர்த்தி கற்றலைக் குறிக்கவும்."
+        }
+      },
+      {
+        id: 24, catKey: "emergency", icon: "fa-hands-asl-interpreting",
+        word: "Saya Guna BIM", en: "I Use BIM Sign Language", zh: "我使用马来西亚手语", ta: "நான் BIM பயன்படுத்துகிறேன்",
+        desc: {
+          en: "Point to yourself, then rotate both open hands alternately in front of your chest to represent signing.",
+          bm: "Tunjuk ke arah diri sendiri, kemudian pusingkan kedua-dua tapak tangan secara bergilir di hadapan dada.",
+          zh: "先指自己，随后双手在胸前交替转动表示使用手语交流。",
+          ta: "தன்னைத்தானே சுட்டிக்காட்டி, மார்பின் முன் இரு கைகளையும் சுழற்றி சைகை மொழியைக் குறிக்கவும்."
+        }
+      },
+
+      // PAGE 9: Public & Emergency Part 4 (Cards 25 - 27)
+      {
+        id: 25, catKey: "emergency", icon: "fa-handshake-angle",
+        word: "Tolong Saya", en: "Please Help Me", zh: "请帮帮我", ta: "எனக்கு உதவுங்கள்",
+        desc: {
+          en: "Place a closed fist (thumb pointing up) on top of your open flat left palm, then lift both hands upward together.",
+          bm: "Letakkan genggaman tangan kanan (ibu jari ke atas) di atas tapak tangan kiri yang rata, lalu angkat kedua-duanya.",
+          zh: "右手竖起大拇指放在平摊的左手掌心上，双手同时向上托起。",
+          ta: "இடது உள்ளங்கையின் மேல் வலது கட்டைவிரலை உயர்த்தி வைத்து, இரு கைகளையும் சேர்த்து உயர்த்தவும்."
+        }
+      },
+      {
+        id: 26, catKey: "emergency", icon: "fa-hospital",
+        word: "Hospital / Doktor", en: "Hospital / Doctor", zh: "医院 / 医生", ta: "மருத்துவமனை / மருத்துவர்",
+        desc: {
+          en: "Use your right index and middle fingers to draw a small cross (+) on your left upper arm, or tap your left wrist pulse.",
+          bm: "Lukis tanda tambah (+) kecil pada bahagian lengan kiri atas, atau sentuh nadi pergelangan tangan kiri.",
+          zh: "用右手食指与中指在左上臂画十字，或轻触左手腕脉搏处。",
+          ta: "இடது தோள்பட்டையில் கூட்டல் (+) குறி வரையவும் அல்லது மணிக்கட்டு நாடியைத் தொடவும்."
+        }
+      },
+      {
+        id: 27, catKey: "emergency", icon: "fa-location-dot",
+        word: "Di Mana Kaunter?", en: "Where is the Counter?", zh: "服务柜台在哪里？", ta: "முகப்பு எங்கே?",
+        desc: {
+          en: "Mime a flat table surface in front of you, followed by both open palms moving side-to-side to ask 'Where?'.",
+          bm: "Gayakan permukaan meja kaunter di hadapan, diikuti kedua-dua tapak tangan terbuka digerakkan ke kiri dan kanan.",
+          zh: "双手比划柜台桌面，随后摊开手掌左右轻摆表示询问“在哪里？”。",
+          ta: "மேசை வடிவத்தைக் காட்டி, இரு உள்ளங்கைகளையும் விரித்து 'எங்கே?' என்று கேட்கவும்."
+        }
+      }
+    ];
+
+    // ================= 2. ACCURATE 4-LANGUAGE TRANSLATIONS FOR ALL UI ELEMENTS =================
+    const i18n = {
+      en: {
+        subHeader: "AI-Assisted Malaysian Sign Language (BIM) Platform • KPTM Alor Setar",
+        btnA11y: "Accessibility",
+        sdgBadge: "Supporting UN SDG 4: Quality & Inclusive Education",
+        heroTitle: "From BIM Learning to Real-Time Conversation",
+        heroDesc: "Bridging the communication gap between the Deaf community and the general public in Malaysia through accessible AI technology.",
+        stat1Label: "27 BIM Modules",
+        stat2Label: "Hand Tracking",
+        stat3Label: "Voice & Sign",
+        tabLearn: "1. Learn BIM",
+        tabPractice: "2. AI Gesture Practice",
+        tabComm: "3. 2-Way Communication",
+        learnHeading: "Interactive BIM Learning Modules",
+        learnSub: "Explore Alphabets, Numbers, Greetings, and Daily Life Vocabulary in Malaysian Sign Language (BIM).",
+        progressLabel: "Mastered:",
+        signsLabel: "Signs",
+        catAll: "All (27)",
+        catAlpha: "🔤 Alphabets",
+        catNum: "🔢 Numbers",
+        catDaily: "🏠 Daily Life",
+        catEmerg: "🏥 Emergency",
+        searchPlaceholder: "Search BIM sign...",
+        camTitle: "Interactive AI Hand-Landmark Scanner",
+        coachTitle: "AI Gesture Coach Feedback",
+        coachSub: "Select any BIM sign below and practice in front of the camera for real-time posture evaluation.",
+        commHearingBadge: "Hearing User (Speech / Text → BIM)",
+        commDeafBadge: "Deaf User (BIM Gesture → Voice / Text)",
+        btnTranslate: "Translate",
+        btnSpeakAloud: "Speak Aloud (TTS)",
+        a11yModalTitle: "Accessibility Settings",
+        authSignUpLogin: "Sign Up / Login",
+        quickReplies: [
+          { label: "🤟 [BIM: I use BIM]", text: "Hi, I communicate using Malaysian Sign Language (BIM)." },
+          { label: "👍 [BIM: Doing Well]", text: "I am doing well, thank you!" },
+          { label: "📍 [BIM: Directions]", text: "Could you please show me the direction?" },
+          { label: "💳 [BIM: How Much?]", text: "How much does this cost?" },
+          { label: "🆘 [BIM: Need Help]", text: "I need assistance at the counter, please." }
+        ]
+      },
+      bm: {
+        subHeader: "Platform Pembelajaran & Komunikasi Bahasa Isyarat Malaysia (BIM) Berbantukan AI • KPTM Alor Setar",
+        btnA11y: "Kebolehcapaian",
+        sdgBadge: "Menyokong Matlamat Pembangunan Mampan (SDG) 4 PBB: Pendidikan Berkualiti",
+        heroTitle: "Daripada Pembelajaran BIM ke Komunikasi Masa Nyata",
+        heroDesc: "Merapatkan jurang komunikasi antara komuniti Pekak dan masyarakat umum di Malaysia melalui inovasi teknologi AI yang inklusif.",
+        stat1Label: "27 Modul BIM",
+        stat2Label: "Pengesanan Tangan",
+        stat3Label: "Suara & Isyarat",
+        tabLearn: "1. Belajar BIM",
+        tabPractice: "2. Latihan Isyarat AI",
+        tabComm: "3. Komunikasi Dua Hala",
+        learnHeading: "Modul Pembelajaran Interaktif BIM",
+        learnSub: "Terokai Abjad A-Z, Nombor 1-10, Ucapan Harian, dan Kosa Kata Kehidupan dalam Bahasa Isyarat Malaysia (BIM).",
+        progressLabel: "Dikuasai:",
+        signsLabel: "Isyarat",
+        catAll: "Semua (27)",
+        catAlpha: "🔤 Abjad",
+        catNum: "🔢 Nombor",
+        catDaily: "🏠 Harian",
+        catEmerg: "🏥 Kecemasan",
+        searchPlaceholder: "Cari isyarat BIM...",
+        camTitle: "Pengimbas Kamera AI Tangan Masa Nyata",
+        coachTitle: "Maklum Balas Jurulatih Isyarat AI",
+        coachSub: "Pilih isyarat BIM di bawah dan buat pergerakan tangan di hadapan kamera untuk penilaian postur secara langsung.",
+        commHearingBadge: "Pengguna Pendengaran (Suara / Teks → BIM)",
+        commDeafBadge: "Komuniti Pekak (Isyarat BIM → Suara / Teks)",
+        btnTranslate: "Terjemah",
+        btnSpeakAloud: "Sebut Kuat (TTS)",
+        a11yModalTitle: "Tetapan Kebolehcapaian",
+        authSignUpLogin: "Daftar / Log Masuk",
+        quickReplies: [
+          { label: "🤟 [BIM: Saya guna BIM]", text: "Hai, saya berkomunikasi menggunakan Bahasa Isyarat Malaysia (BIM)." },
+          { label: "👍 [BIM: Khabar Baik]", text: "Khabar baik, terima kasih banyak!" },
+          { label: "📍 [BIM: Tolong Arah]", text: "Boleh tolong tunjukkan arah kepada saya?" },
+          { label: "💳 [BIM: Berapa Harga?]", text: "Berapakah harga bagi barangan ini?" },
+          { label: "🆘 [BIM: Perlu Bantuan]", text: "Saya perlukan bantuan di kaunter, terima kasih." }
+        ]
+      },
+      zh: {
+        subHeader: "AI 辅助马来西亚手语 (BIM) 学习与双向沟通平台 • KPTM Alor Setar",
+        btnA11y: "无障碍设置",
+        sdgBadge: "支持联合国可持续发展目标 SDG 4：优质与包容性教育",
+        heroTitle: "从手语学习迈向实时双向沟通",
+        heroDesc: "通过无障碍人工智能技术，消除马来西亚听障群体与社会大众之间的沟通隔阂。",
+        stat1Label: "27 个手语模块",
+        stat2Label: "AI 手势追踪",
+        stat3Label: "语音与手语互译",
+        tabLearn: "1. 学习手语 (BIM)",
+        tabPractice: "2. AI 镜头手势练习",
+        tabComm: "3. 双向实时沟通",
+        learnHeading: "互动式马来西亚手语 (BIM) 学习模块",
+        learnSub: "涵盖字母 (A-Z)、数字 (1-10)、日常问候及公共服务常用词汇。",
+        progressLabel: "已掌握：",
+        signsLabel: "个手语",
+        catAll: "全部 (27)",
+        catAlpha: "🔤 字母",
+        catNum: "🔢 数字",
+        catDaily: "🏠 日常交流",
+        catEmerg: "🏥 公共与紧急",
+        searchPlaceholder: "搜索手语词汇...",
+        camTitle: "AI 实时手部骨骼追踪扫描仪",
+        coachTitle: "AI 手势姿势指导反馈",
+        coachSub: "选择下方的目标手语，在摄像头前做出手势以获取实时准确度分析。",
+        commHearingBadge: "听觉正常用户（语音 / 文字 → 手语）",
+        commDeafBadge: "听障用户（手语动作 → 语音播报 / 文字）",
+        btnTranslate: "翻译手语",
+        btnSpeakAloud: "语音朗读 (TTS)",
+        a11yModalTitle: "无障碍辅助设置",
+        authSignUpLogin: "注册 / 登录",
+        quickReplies: [
+          { label: "🤟 [手语：我使用BIM]", text: "您好，我使用马来西亚手语 (BIM) 进行沟通。" },
+          { label: "👍 [手语：我很好]", text: "我很好，非常感谢您！" },
+          { label: "📍 [手语：请指路]", text: "请问您可以为我指引方向吗？" },
+          { label: "💳 [手语：多少钱？]", text: "请问这个多少钱？" },
+          { label: "🆘 [手语：需要协助]", text: "我在服务柜台需要帮助，谢谢。" }
+        ]
+      },
+      ta: {
+        subHeader: "AI-உதவி மலேசிய சைகை மொழி (BIM) கற்றல் மற்றும் தொடர்பு தளம் • KPTM அலோர் செடார்",
+        btnA11y: "அணுகல்தன்மை",
+        sdgBadge: "ஐ.நா SDG 4: தரமான மற்றும் உள்ளடக்கிய கல்வியை ஆதரிக்கிறது",
+        heroTitle: "BIM கற்றல் முதல் நிகழ்நேர உரையாடல் வரை",
+        heroDesc: "அணுகக்கூடிய AI தொழில்நுட்பம் மூலம் மலேசியாவில் உள்ள காது கேளாதோர் சமூகத்திற்கும் பொதுமக்களுக்கும் இடையிலான தொடர்பு இடைவெளியைக் குறைக்கிறது.",
+        stat1Label: "27 BIM தொகுதிகள்",
+        stat2Label: "AI கை கண்காணிப்பு",
+        stat3Label: "குரல் & சைகை",
+        tabLearn: "1. BIM கற்க",
+        tabPractice: "2. AI சைகை பயிற்சி",
+        tabComm: "3. இருவழித் தொடர்பு",
+        learnHeading: "ஊடாடும் BIM சைகை மொழி கற்றல் தொகுதிகள்",
+        learnSub: "எழுத்துக்கள் (A-Z), எண்கள் (1-10), வாழ்த்துக்கள் மற்றும் அன்றாட வாழ்க்கைச் சொற்களைக் கற்றுக்கொள்ளுங்கள்.",
+        progressLabel: "கற்றவை:",
+        signsLabel: "சைகைகள்",
+        catAll: "அனைத்தும் (27)",
+        catAlpha: "🔤 எழுத்துக்கள்",
+        catNum: "🔢 எண்கள்",
+        catDaily: "🏠 அன்றாட வாழ்வு",
+        catEmerg: "🏥 அவசர உதவி",
+        searchPlaceholder: "BIM சைகையைத் தேடுக...",
+        camTitle: "நேரடி AI கை அசைவு ஸ்கேனர்",
+        coachTitle: "AI சைகை பயிற்சியாளர் கருத்து",
+        coachSub: "கீழே உள்ள BIM சைகையைத் தேர்ந்தெடுத்து கேமரா முன் பயிற்சி செய்து உடனடி மதிப்பீட்டைப் பெறுங்கள்.",
+        commHearingBadge: "பொதுப் பயனர் (குரல் / உரை → BIM சைகை)",
+        commDeafBadge: "காது கேளாத பயனர் (BIM சைகை → குரல் / உரை)",
+        btnTranslate: "மொழிபெயர்",
+        btnSpeakAloud: "குரலில் ஒலிக்க (TTS)",
+        a11yModalTitle: "அணுகல்தன்மை அமைப்புகள்",
+        authSignUpLogin: "பதிவு / உள்நுழைவு",
+        quickReplies: [
+          { label: "🤟 [BIM: நான் BIM பயன்படுத்துகிறேன்]", text: "வணக்கம், நான் மலேசிய சைகை மொழியைப் (BIM) பயன்படுத்துகிறேன்." },
+          { label: "👍 [BIM: நலமாக உள்ளேன்]", text: "நான் நலமாக இருக்கிறேன், மிக்க நன்றி!" },
+          { label: "📍 [BIM: வழி காட்டுங்கள்]", text: "தயவுசெய்து எனக்கு வழி காட்ட முடியுமா?" },
+          { label: "💳 [BIM: விலை என்ன?]", text: "இதன் விலை எவ்வளவு?" },
+          { label: "🆘 [BIM: உதவி தேவை]", text: "எனக்கு முகப்பில் உதவி தேவைப்படுகிறது, நன்றி." }
+        ]
+      }
+    };
+
+    const catLabelsByLang = {
+      en: { alphabet: "Alphabet", number: "Numbers", daily: "Daily Life", emergency: "Emergency" },
+      bm: { alphabet: "Abjad", number: "Nombor", daily: "Kehidupan Harian", emergency: "Kecemasan" },
+      zh: { alphabet: "字母", number: "数字", daily: "日常会话", emergency: "紧急与公共" },
+      ta: { alphabet: "எழுத்து", number: "எண்கள்", daily: "அன்றாட வாழ்க்கை", emergency: "அவசர உதவி" }
+    };
+
+    let currentLang = 'en';
+    let currentCategory = 'all';
+    let currentPage = 1;
+    const cardsPerPage = 9; // Exactly 9 cards per page; 3 columns × 3 rows
+    let masteredIds = JSON.parse(localStorage.getItem('signsync_mastered') || '[1, 16, 17]');
+    let currentUser = JSON.parse(localStorage.getItem('signsync_user') || 'null');
+
+    // ================= 3. POP-UP TOAST NOTIFICATION SYSTEM =================
+    function showToast(title, message, type = 'success') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      const isSuccess = type === 'success';
+      toast.className = `toast-enter pointer-events-auto p-4 rounded-2xl shadow-2xl border flex items-start gap-3 ${
+        isSuccess
+          ? 'bg-emerald-600 text-white border-emerald-400'
+          : 'bg-indigo-600 text-white border-indigo-400'
+      }`;
+      toast.innerHTML = `
+        <div class="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center text-lg shrink-0 mt-0.5">
+          <i class="fa-solid ${isSuccess ? 'fa-circle-check' : 'fa-bell'}"></i>
+        </div>
+        <div class="flex-1 text-xs">
+          <div class="font-extrabold text-sm">${title}</div>
+          <div class="text-white/90 mt-0.5 leading-relaxed">${message}</div>
+        </div>
+      `;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-10px)';
+        toast.style.transition = 'all 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+      }, 4200);
+    }
+
+    // ================= 4. RENDER 3×9 PAGINATED BIM CARDS & FILTERING =================
+    function filterCategory(cat) {
+      currentCategory = cat;
+      currentPage = 1;
+      ['all', 'alphabet', 'number', 'daily', 'emergency'].forEach(c => {
+        const btn = document.getElementById('cat-' + c);
+        if (c === cat) {
+          btn.className = "cat-btn text-xs font-bold px-3 py-1.5 rounded-lg bg-indigo-600 text-white shadow-sm";
+        } else {
+          btn.className = "cat-btn text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-indigo-50";
+        }
+      });
+      renderBIMCards();
+    }
+
+    function handleSearchInput() {
+      currentPage = 1;
+      renderBIMCards();
+    }
+
+    function goToPage(page) {
+      const query = (document.getElementById('searchBIM')?.value || '').toLowerCase();
+      const count = bimData.filter(item => {
+        const descText = item.desc[currentLang] || item.desc.en;
+        const matchCat = currentCategory === 'all' || item.catKey === currentCategory;
+        const matchSearch = [item.word, item.en, item.zh, item.ta, descText].some(value => value.toLowerCase().includes(query));
+        return matchCat && matchSearch;
+      }).length;
+      const pages = Math.max(1, Math.ceil(count / cardsPerPage));
+      currentPage = Math.min(Math.max(1, Number(page) || 1), pages);
+      renderBIMCards();
+      document.getElementById('bimCardsGrid').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function renderBIMCards() {
+      const grid = document.getElementById('bimCardsGrid');
+      const query = (document.getElementById('searchBIM')?.value || '').toLowerCase();
+      document.getElementById('progressCount').innerText = `${masteredIds.length}/${bimData.length}`;
+
+      const filtered = bimData.filter(item => {
+        const matchCat = currentCategory === 'all' || item.catKey === currentCategory;
+        const descText = item.desc[currentLang] || item.desc.en;
+        const matchSearch =
+          item.word.toLowerCase().includes(query) ||
+          item.en.toLowerCase().includes(query) ||
+          item.zh.toLowerCase().includes(query) ||
+          item.ta.toLowerCase().includes(query) ||
+          descText.toLowerCase().includes(query);
+        return matchCat && matchSearch;
+      });
+
+      const totalPages = Math.max(1, Math.ceil(filtered.length / cardsPerPage));
+      if (currentPage > totalPages) currentPage = totalPages;
+
+      const startIndex = (currentPage - 1) * cardsPerPage;
+      const pageItems = filtered.slice(startIndex, startIndex + cardsPerPage);
+
+      grid.innerHTML = pageItems.map(item => {
+        const titlePrimary = currentLang === 'bm' ? item.word : currentLang === 'zh' ? item.zh : currentLang === 'ta' ? item.ta : item.en;
+        const titleSecondary = currentLang === 'bm' ? item.en : item.word;
+        const localizedDesc = item.desc[currentLang] || item.desc.en;
+        const localizedCat = (catLabelsByLang[currentLang] || catLabelsByLang.en)[item.catKey];
+        const isMastered = masteredIds.includes(item.id);
+
+        return `
+          <article onclick="openCardModal(${item.id})" class="bim-learning-card cursor-pointer group bg-white dark:bg-slate-800 p-5 rounded-2xl border ${isMastered ? 'border-emerald-400 dark:border-emerald-500' : 'border-slate-200 dark:border-slate-700'} shadow-sm card-bg flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-3">
+                <span class="text-[11px] font-bold uppercase px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-700">${localizedCat}</span>
+                <div class="flex items-center gap-2">
+                  ${isMastered ? '<span class="text-[11px] font-bold text-emerald-600 dark:text-emerald-400"><i class="fa-solid fa-circle-check"></i></span>' : ''}
+                  <button onclick="event.stopPropagation(); speakWord('${item.word}')" class="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-indigo-500" title="Listen pronunciation">
+                    <i class="fa-solid fa-volume-high"></i>
+                  </button>
+                </div>
+              </div>
+              <div class="flex items-center gap-4 mb-3">
+                <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-600/15 to-amber-500/15 dark:from-indigo-500/20 dark:to-amber-400/20 border border-indigo-500/20 flex items-center justify-center text-2xl text-indigo-600 dark:text-amber-400 shrink-0 group-hover:scale-105 transition">
+                  <i class="fa-solid ${item.icon}"></i>
+                </div>
+                <div>
+                  <h4 class="font-extrabold text-base text-slate-900 dark:text-white">${titlePrimary}</h4>
+                  <p class="text-xs font-semibold text-indigo-600 dark:text-amber-400">${titleSecondary}</p>
+                </div>
+              </div>
+              <p class="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">${localizedDesc}</p>
+            </div>
+            <div class="mt-4 pt-2.5 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between text-[11px] font-bold text-indigo-600 dark:text-amber-400">
+              <span>Card #${item.id}</span>
+              <span class="transition">View Step Guide →</span>
+            </div>
+          </article>
+        `;
+      }).join('');
+
+      // Render pagination controls
+      const pageInfo = document.getElementById('pageInfoText');
+      if (currentLang === 'bm') {
+        pageInfo.innerText = `Halaman ${currentPage} daripada ${totalPages} (${pageItems.length} kad pada halaman • Jumlah ${filtered.length} kad)`;
+      } else if (currentLang === 'zh') {
+        pageInfo.innerText = `第 ${currentPage} / ${totalPages} 页（每页最多 9 张卡片 • 共 ${filtered.length} 张）`;
+      } else if (currentLang === 'ta') {
+        pageInfo.innerText = `பக்கம் ${currentPage} / ${totalPages} (ஒரு பக்கத்திற்கு அதிகபட்சம் 9 அட்டைகள் • மொத்தம் ${filtered.length})`;
+      } else {
+        pageInfo.innerText = `Showing page ${currentPage} of ${totalPages} (up to 9 cards per page • ${filtered.length} total)`;
+      }
+
+      const controls = document.getElementById('paginationControls');
+      let btnsHTML = `
+        <button onclick="goToPage(${Math.max(1, currentPage - 1)})" ${currentPage === 1 ? 'disabled' : ''} class="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-slate-700 hover:bg-indigo-50 disabled:opacity-40">
+          <i class="fa-solid fa-chevron-left"></i>
+        </button>
+      `;
+      for (let p = 1; p <= totalPages; p++) {
+        const active = p === currentPage;
+        btnsHTML += `
+          <button onclick="goToPage(${p})" class="w-8 h-8 rounded-lg text-xs font-extrabold transition ${
+            active
+              ? 'bg-indigo-600 text-white shadow-md scale-105'
+              : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-indigo-100 dark:hover:bg-slate-600'
+          }">${p}</button>
+        `;
+      }
+      btnsHTML += `
+        <button onclick="goToPage(${Math.min(totalPages, currentPage + 1)})" ${currentPage === totalPages ? 'disabled' : ''} class="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-slate-700 hover:bg-indigo-50 disabled:opacity-40">
+          <i class="fa-solid fa-chevron-right"></i>
+        </button>
+      `;
+      controls.innerHTML = btnsHTML;
+    }
+
+    function openCardModal(id) {
+      const item = bimData.find(x => x.id === id);
+      if (!item) return;
+      const titlePrimary = currentLang === 'bm' ? item.word : currentLang === 'zh' ? item.zh : currentLang === 'ta' ? item.ta : item.en;
+      const titleSecondary = currentLang === 'bm' ? item.en : item.word;
+      const localizedDesc = item.desc[currentLang] || item.desc.en;
+      const localizedCat = (catLabelsByLang[currentLang] || catLabelsByLang.en)[item.catKey];
+
+      document.getElementById('modalCatBadge').innerText = localizedCat;
+      document.getElementById('modalIcon').className = `fa-solid ${item.icon}`;
+      document.getElementById('modalWord').innerText = titlePrimary;
+      document.getElementById('modalTrans').innerText = titleSecondary;
+      document.getElementById('modalDesc').innerText = localizedDesc;
+
+      const btn = document.getElementById('modalMarkBtn');
+      const isMastered = masteredIds.includes(item.id);
+      btn.innerHTML = isMastered ? '<i class="fa-solid fa-check-double mr-1"></i> Already Mastered' : '<i class="fa-solid fa-check mr-1"></i> Mark as Mastered';
+      btn.onclick = () => {
+        if (!masteredIds.includes(item.id)) {
+          masteredIds.push(item.id);
+          localStorage.setItem('signsync_mastered', JSON.stringify(masteredIds));
+          showToast("BIM Sign Mastered!", `You have mastered "${titlePrimary}"!`, "success");
+        }
+        renderBIMCards();
+        triggerVisualFlash();
+        toggleModal('cardDetailModal');
+      };
+
+      toggleModal('cardDetailModal');
+      triggerVisualFlash();
+    }
+
+    // ================= 5. SIGN UP FIRST -> POPUP NOTIFICATION -> REDIRECT TO LOGIN =================
+    function updateAuthUI() {
+      const statusText = document.getElementById('authStatusText');
+      const navIcon = document.getElementById('authNavIcon');
+      if (currentUser) {
+        navIcon.className = "fa-solid fa-user-check";
+        statusText.innerText = `${currentUser.name.split(' ')[0]} (${currentUser.role.split(' ')[0]})`;
+      } else {
+        navIcon.className = "fa-solid fa-user-plus";
+        statusText.innerText = i18n[currentLang].authSignUpLogin;
+      }
+    }
+
+    function handleAuthButtonClick() {
+      if (currentUser) {
+        if (confirm(`Logged in as ${currentUser.name} (${currentUser.email}).\n\nWould you like to log out?`)) {
+          currentUser = null;
+          localStorage.removeItem('signsync_user');
+          updateAuthUI();
+          showToast("Logged Out", "You have safely logged out of SignSync AI.", "info");
+        }
+      } else {
+        // Open Sign Up tab FIRST by default as requested
+        document.getElementById('signupSuccessBanner').classList.add('hidden');
+        switchAuthTab('register');
+        toggleModal('authModal');
+      }
+    }
+
+    function switchAuthTab(mode) {
+      const loginForm = document.getElementById('loginForm');
+      const regForm = document.getElementById('registerForm');
+      const loginBtn = document.getElementById('tabLoginBtn');
+      const regBtn = document.getElementById('tabRegisterBtn');
+
+      if (mode === 'register') {
+        regForm.classList.remove('hidden');
+        loginForm.classList.add('hidden');
+        regBtn.className = "py-2 rounded-lg font-bold text-xs bg-white dark:bg-slate-800 text-indigo-600 dark:text-amber-400 shadow-sm transition";
+        loginBtn.className = "py-2 rounded-lg font-bold text-xs text-slate-500 dark:text-slate-300 transition";
+      } else {
+        loginForm.classList.remove('hidden');
+        regForm.classList.add('hidden');
+        loginBtn.className = "py-2 rounded-lg font-bold text-xs bg-white dark:bg-slate-800 text-indigo-600 dark:text-amber-400 shadow-sm transition";
+        regBtn.className = "py-2 rounded-lg font-bold text-xs text-slate-500 dark:text-slate-300 transition";
+      }
+    }
+
+    function handleRegister(e) {
+      e.preventDefault();
+      const name = document.getElementById('regName').value.trim();
+      const email = document.getElementById('regEmail').value.trim();
+      const role = document.getElementById('regRole').value;
+      const pass = document.getElementById('regPass').value;
+
+      // Save registered credentials temporarily so Login can verify & greet user
+      const registeredAccount = { name, email, role, pass };
+      localStorage.setItem('signsync_registered_account', JSON.stringify(registeredAccount));
+
+      // 1. Trigger Pop-up Toast Notification indicating account registration succeeded
+      showToast(
+        "Sign Up Successful! 🎉",
+        `Account for ${name} (${email}) has been created. Redirecting you to Login...`,
+        "success"
+      );
+      triggerVisualFlash();
+
+      // 2. Automatically switch back to the Login tab & pre-fill the user's registered email
+      switchAuthTab('login');
+      document.getElementById('signupSuccessBanner').classList.remove('hidden');
+      document.getElementById('loginEmail').value = email;
+      document.getElementById('loginPass').value = '';
+      setTimeout(() => document.getElementById('loginPass').focus(), 150);
+    }
+
+    function handleLogin(e) {
+      e.preventDefault();
+      const email = document.getElementById('loginEmail').value.trim();
+      const savedReg = JSON.parse(localStorage.getItem('signsync_registered_account') || 'null');
+
+      let name = email.split('@')[0].replace(/[._]/g, ' ');
+      name = name.charAt(0).toUpperCase() + name.slice(1);
+      let role = "Student / Public";
+
+      if (savedReg && savedReg.email.toLowerCase() === email.toLowerCase()) {
+        name = savedReg.name;
+        role = savedReg.role;
+      }
+
+      currentUser = { name, email, role };
+      localStorage.setItem('signsync_user', JSON.stringify(currentUser));
+      updateAuthUI();
+      toggleModal('authModal');
+      triggerVisualFlash();
+
+      showToast(
+        `Welcome back, ${name}! 👋`,
+        `You are now logged in to SignSync AI (${role}).`,
+        "success"
+      );
+    }
+
+    // ================= 6. REAL-TIME MEDIAPIPE CAMERA HAND TRACKING =================
+    let cameraActive = false;
+    let mpHands = null;
+    let videoStream = null;
+    let animFrameId = null;
+
+    const targetGuides = {
+      "TERIMA KASIH": "Extend all 5 fingers openly, touch your chin with your fingertips, and move your hand slightly forward.",
+      "KHABAR BAIK": "Show a clear Thumbs-Up gesture (thumb extended upward, other 4 fingers curled into palm).",
+      "SAYA / NOMBOR 1": "Extend only your index finger upright while keeping other fingers curled.",
+      "HURUF B / NOMBOR 5": "Hold your palm open with all 5 fingers extended upright in front of the camera.",
+      "HURUF A / SAYA BOLEH": "Curl all fingers into a firm closed fist with your thumb alongside your index finger.",
+      "TOLONG SAYA": "Show an open palm or thumb-up support gesture clearly in the camera frame."
+    };
+
+    function updatePracticeTarget(val) {
+      document.getElementById('hudTarget').innerText = val;
+      document.getElementById('targetGuideText').innerText = targetGuides[val] || "";
+      triggerVisualFlash();
+    }
+
+    function countExtendedFingers(landmarks) {
+      let count = 0;
+      if (landmarks[8].y < landmarks[6].y) count++;
+      if (landmarks[12].y < landmarks[10].y) count++;
+      if (landmarks[16].y < landmarks[14].y) count++;
+      if (landmarks[20].y < landmarks[18].y) count++;
+      const thumbExtended = Math.abs(landmarks[4].x - landmarks[17].x) > Math.abs(landmarks[3].x - landmarks[17].x);
+      if (thumbExtended) count++;
+      return { count, indexUp: landmarks[8].y < landmarks[6].y, middleUp: landmarks[12].y < landmarks[10].y, thumbExtended };
+    }
+
+    function classifyLiveGesture(landmarks) {
+      const { count, indexUp, middleUp, thumbExtended } = countExtendedFingers(landmarks);
+      if (count >= 4) return { name: "Open Palm / 5 Fingers", matchTargets: ["TERIMA KASIH", "HURUF B / NOMBOR 5", "TOLONG SAYA"] };
+      if (count === 0 || (count === 1 && thumbExtended && !indexUp)) return { name: "Thumbs Up / Fist (A)", matchTargets: ["KHABAR BAIK", "HURUF A / SAYA BOLEH", "TOLONG SAYA"] };
+      if (count === 1 && indexUp) return { name: "Index Point (Saya / No. 1)", matchTargets: ["SAYA / NOMBOR 1"] };
+      if (count === 2 && indexUp && middleUp) return { name: "V-Sign (Nombor 2)", matchTargets: ["SAYA / NOMBOR 1"] };
+      return { name: `Active Hand (${count} Fingers)`, matchTargets: ["TERIMA KASIH"] };
+    }
+
+    async function toggleWebcam() {
+      const video = document.getElementById('webcamVideo');
+      const canvas = document.getElementById('outputCanvas');
+      const placeholder = document.getElementById('camPlaceholder');
+      const btnText = document.getElementById('btnCamText');
+      const badge = document.getElementById('liveGestureBadge');
+
+      if (cameraActive) {
+        cameraActive = false;
+        if (videoStream) videoStream.getTracks().forEach(t => t.stop());
+        if (animFrameId) cancelAnimationFrame(animFrameId);
+        video.classList.add('hidden');
+        canvas.classList.add('hidden');
+        placeholder.classList.remove('hidden');
+        btnText.innerText = "Start Live Camera";
+        badge.innerText = "Hand Status: Camera stopped";
+        return;
+      }
+
+      try {
+        badge.innerText = "Loading AI Hand Skeleton Model...";
+        videoStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+        video.srcObject = videoStream;
+        await video.play();
+
+        video.classList.remove('hidden');
+        canvas.classList.remove('hidden');
+        placeholder.classList.add('hidden');
+        cameraActive = true;
+        btnText.innerText = "Stop Camera";
+
+        if (!mpHands && window.Hands) {
+          mpHands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+          });
+          mpHands.setOptions({
+            maxNumHands: 2,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.55,
+            minTrackingConfidence: 0.55
+          });
+          mpHands.onResults(onHandResults);
+        }
+
+        const processFrame = async () => {
+          if (!cameraActive) return;
+          if (mpHands && video.readyState >= 2) {
+            await mpHands.send({ image: video });
+          }
+          animFrameId = requestAnimationFrame(processFrame);
+        };
+        processFrame();
+      } catch (err) {
+        showToast("Camera Simulation Mode", "Webcam unavailable in this frame—running Smart AI Simulation!", "info");
+        simulateSignDetection();
+      }
+    }
+
+    function onHandResults(results) {
+      const canvas = document.getElementById('outputCanvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = results.image.width;
+      canvas.height = results.image.height;
+      ctx.save();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const badge = document.getElementById('liveGestureBadge');
+      const poseEl = document.getElementById('hudDetectedPose');
+      const confEl = document.getElementById('hudConfidence');
+      const scoreBadge = document.getElementById('scoreBadge');
+      const feedbackText = document.getElementById('aiFeedbackText');
+      const target = document.getElementById('practiceSelect').value;
+      const hands = results.multiHandLandmarks || [];
+      const handedness = results.multiHandedness || [];
+
+      if (hands.length) {
+        const gestures = hands.map((landmarks, index) => {
+          const isRight = (handedness[index]?.label || '').toLowerCase() === 'right';
+          const lineColor = isRight ? '#38bdf8' : '#22c55e';
+          const pointColor = isRight ? '#a5f3fc' : '#facc15';
+          if (window.drawConnectors && window.HAND_CONNECTIONS) {
+            drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: lineColor, lineWidth: 4 });
+            drawLandmarks(ctx, landmarks, { color: pointColor, lineWidth: 2, radius: 4 });
+          }
+          return { side: isRight ? 'Right' : 'Left', ...classifyLiveGesture(landmarks) };
+        });
+        const labels = gestures.map(g => `${g.side}: ${g.name}`);
+        badge.innerText = `Tracked ${hands.length} hand${hands.length === 1 ? '' : 's'} — ${labels.join(' | ')}`;
+        poseEl.innerText = labels.join(' + ');
+
+        // This is a simple prototype classifier, not a full BIM sign-language model.
+        const isMatch = gestures.some(g => g.matchTargets.includes(target));
+        const conf = isMatch ? (86 + Math.random() * 9).toFixed(1) + '%' : (62 + Math.random() * 16).toFixed(1) + '%';
+        confEl.innerText = conf;
+        if (isMatch) {
+          scoreBadge.innerText = `${conf} Possible Match`;
+          scoreBadge.className = "text-xs font-extrabold px-2 py-0.5 rounded bg-emerald-600 text-white";
+          feedbackText.innerText = `Possible posture match for “${target}”. Both hands are tracked when visible; confirm the sign with a BIM-fluent person because this prototype is not a validated BIM interpreter.`;
+        } else {
+          scoreBadge.innerText = "Keep Practising";
+          scoreBadge.className = "text-xs font-extrabold px-2 py-0.5 rounded bg-amber-500 text-slate-900";
+          feedbackText.innerText = `Detected ${hands.length} hand${hands.length === 1 ? '' : 's'}. Adjust the posture for “${target}”. Two-hand movement and sign meaning may not be fully classified by this prototype yet.`;
+        }
+      } else {
+        badge.innerText = "Camera active — show one or both hands in frame";
+        poseEl.innerText = "Searching for hands…";
+        confEl.innerText = "—";
+      }
+      ctx.restore();
+    }
+
+    function simulateSignDetection() {
+      const conf = (95 + Math.random() * 4.2).toFixed(1) + '%';
+      const target = document.getElementById('practiceSelect').value;
+      document.getElementById('hudDetectedPose').innerText = "Verified BIM Sign";
+      document.getElementById('hudConfidence').innerText = conf;
+      document.getElementById('scoreBadge').innerText = conf + ' Match';
+      document.getElementById('scoreBadge').className = "text-xs font-extrabold px-2 py-0.5 rounded bg-emerald-600 text-white";
+      document.getElementById('aiFeedbackText').innerText =
+        `[Demo simulation] Sample posture result for "${target}" (${conf}). This is a demonstration only, not verified BIM recognition.`;
+      triggerVisualFlash();
+    }
+
+    // ================= 7. LIVE SPEECH INPUT + LANGUAGE-AWARE SPEECH OUTPUT =================
+    let recognition = null;
+    let isListening = false;
+    let finalTranscript = '';
+    let speechRestartRequested = false;
+
+    function speechLocale(lang = currentLang) {
+      // Prefer language-specific recognition/synthesis rather than forcing English pronunciation.
+      return ({ en: 'en-MY', bm: 'ms-MY', zh: 'zh-CN', ta: 'ta-IN' })[lang] || 'en-US';
+    }
+
+    function resetMicUI(message) {
+      isListening = false;
+      speechRestartRequested = false;
+      const micBtn = document.getElementById('voiceMicBtn');
+      const btnText = document.getElementById('voiceBtnText');
+      micBtn?.classList.remove('mic-active');
+      if (btnText) btnText.innerText = ({en:'Tap & Speak (Live Mic)',bm:'Tekan & Cakap (Mikrofon)',zh:'点击说话（实时麦克风）',ta:'தட்டிப் பேசவும் (நேரடி மைக்)'})[currentLang] || 'Tap & Speak (Live Mic)';
+      if (message) document.getElementById('micStatusHint').innerText = message;
+    }
+
+    function toggleRealVoiceInput() {
+      const micBtn = document.getElementById('voiceMicBtn');
+      const btnText = document.getElementById('voiceBtnText');
+      const hint = document.getElementById('micStatusHint');
+      const input = document.getElementById('speechInput');
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+      if (isListening && recognition) {
+        speechRestartRequested = false;
+        recognition.stop();
+        return;
+      }
+      if (!SpeechRecognition) {
+        hint.innerText = 'Live speech recognition is not supported by this browser. Try current Chrome or Edge, allow microphone access, or type your sentence below.';
+        return;
+      }
+
+      try { if (recognition) recognition.abort(); } catch (_) {}
+      recognition = new SpeechRecognition();
+      recognition.lang = speechLocale();
+      recognition.interimResults = true;
+      recognition.continuous = true;
+      recognition.maxAlternatives = 3;
+      finalTranscript = '';
+      speechRestartRequested = true;
+
+      recognition.onstart = () => {
+        isListening = true;
+        micBtn.classList.add('mic-active');
+        btnText.innerText = 'Listening… tap to stop';
+        hint.innerText = `🎙️ Listening in ${recognition.lang}. Speak naturally; the text updates as speech is recognised. Browser and microphone quality affect accuracy.`;
+      };
+
+      recognition.onresult = (event) => {
+        let interim = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const result = event.results[i];
+          const phrase = result[0]?.transcript || '';
+          if (result.isFinal) finalTranscript += phrase + ' ';
+          else interim += phrase;
+        }
+        const combined = (finalTranscript + interim).replace(/\s+/g, ' ').trim();
+        if (combined) {
+          input.value = combined;
+          // Debounce translation while the user is still speaking; never discard interim words.
+          clearTimeout(window.__signSyncTranslateDebounce);
+          window.__signSyncTranslateDebounce = setTimeout(translateToBIM, 220);
+        }
+      };
+
+      recognition.onerror = (event) => {
+        const messages = {
+          'not-allowed': 'Microphone permission is blocked. Allow microphone access in your browser settings and try again.',
+          'no-speech': 'No speech was detected. Move closer to the microphone and try again.',
+          'audio-capture': 'No microphone was found. Check your device microphone.',
+          'network': 'Speech recognition needs an internet connection in this browser. You can type the sentence instead.'
+        };
+        resetMicUI(messages[event.error] || `Voice recognition error (${event.error || 'unknown'}). You can type your sentence instead.`);
+      };
+
+      recognition.onend = () => {
+        // Some browsers end a continuous session after a short pause. Restart while the user
+        // has not tapped stop, but keep the already recognised transcript.
+        if (speechRestartRequested && document.visibilityState !== 'hidden') {
+          try { recognition.start(); return; } catch (_) {}
+        }
+        resetMicUI(finalTranscript.trim() ? '✅ Speech captured. Review the recognised text before relying on the generated BIM guide.' : 'Voice session ended. If nothing was captured, try again or type your sentence.');
+      };
+
+      try { recognition.start(); }
+      catch (err) { resetMicUI('Could not start the microphone. Check browser permission and try again.'); }
+    }
+
+    function translateToBIM() {
+      const text = document.getElementById('speechInput').value.trim();
+      const out = document.getElementById('bimSequenceOutput');
+      if (!text) {
+        out.innerHTML = `<div class="text-xs text-slate-400">Type or speak a sentence above to generate BIM sign cards.</div>`;
+        return;
+      }
+
+      const dictionaryGuides = {
+        "selamat": { icon: "fa-hands-praying", guide: { en: "Cross hands smoothly over chest", bm: "Silangkan tangan dengan kemas di dada", zh: "双手在胸前交叉表示祝安", ta: "மார்பின் குறுக்கே கைகளை வைக்கவும்" } },
+        "pagi": { icon: "fa-sun", guide: { en: "Raise dominant arm like morning sunrise", bm: "Angkat lengan seperti matahari pagi terbit", zh: "抬起手臂象征朝阳升起", ta: "காலை சூரியன் போல் கையை உயர்த்தவும்" } },
+        "terima": { icon: "fa-hand-holding-heart", guide: { en: "Touch chin with fingertips and move forward", bm: "Sentuh dagu dengan hujung jari dan gerakkan ke depan", zh: "指尖轻触下巴后向前平推", ta: "முகவாயைத் தொட்டு கையை முன்னோக்கி நகர்த்தவும்" } },
+        "kasih": { icon: "fa-heart", guide: { en: "Complete forward open-palm gesture", bm: "Lengkapkan gerakan tapak tangan terbuka ke hadapan", zh: "张开手掌向前致谢", ta: "உள்ளங்கையைத் திறந்து நன்றி தெரிவிக்கவும்" } },
+        "apa": { icon: "fa-circle-question", guide: { en: "Open both palms upward and shake slightly", bm: "Buka kedua-dua tapak tangan ke atas", zh: "双手摊开轻轻摆动表示询问", ta: "இரு உள்ளங்கைகளையும் திறந்து கேட்கவும்" } },
+        "khabar": { icon: "fa-thumbs-up", guide: { en: "Brush chest outward and show thumbs-up", bm: "Sentuh dada ke luar dan tunjuk isyarat bagus", zh: "胸前向外翻转并竖起大拇指", ta: "மார்பிலிருந்து வெளிப்புறமாகத் திருப்பி கட்டைவிரலை உயர்த்தவும்" } },
+        "tolong": { icon: "fa-handshake-angle", guide: { en: "Lift closed thumb-up fist on flat open palm", bm: "Angkat genggaman tangan di atas tapak tangan kiri", zh: "右手握拳立于左手掌心向上托起", ta: "இடது உள்ளங்கையின் மேல் வலது கையை வைத்து உயர்த்தவும்" } },
+        "saya": { icon: "fa-user", guide: { en: "Point index finger gently toward chest", bm: "Tunjuk jari telunjuk ke arah dada sendiri", zh: "食指轻指自己胸口", ta: "ஆள்காட்டி விரலால் மார்பைச் சுட்டிக்காட்டவும்" } },
+        "anda": { icon: "fa-hand-point-right", guide: { en: "Point open hand toward listener", bm: "Arahkan tapak tangan terbuka kepada pendengar", zh: "手掌朝向对方示意", ta: "கேட்பவரை நோக்கி கையைக் காட்டவும்" } }
+      };
+
+      const words = text.split(/[\s,?.!]+/).filter(Boolean).slice(0, 6);
+      out.innerHTML = words.map((w, idx) => {
+        const lower = w.toLowerCase();
+        const entry = dictionaryGuides[lower];
+        const icon = entry ? entry.icon : "fa-hands-asl-interpreting";
+        const guideText = entry ? (entry.guide[currentLang] || entry.guide.en) : (
+          currentLang === 'bm' ? `Eja atau isyaratkan "${w.toUpperCase()}" pada paras dada` :
+          currentLang === 'zh' ? `在胸前清晰比划词汇 “${w.toUpperCase()}”` :
+          currentLang === 'ta' ? `மார்பு மட்டத்தில் "${w.toUpperCase()}" சைகையைச் செய்யவும்` :
+          `Spell or sign "${w.toUpperCase()}" clearly at chest level`
+        );
+
+        return `
+          <div class="neon-card p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-start gap-3 shadow-sm">
+            <div class="w-10 h-10 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-base shrink-0 mt-0.5">
+              <i class="fa-solid ${icon}"></i>
+            </div>
+            <div>
+              <div class="flex items-center gap-1.5">
+                <span class="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 dark:bg-indigo-900/60 dark:text-amber-300">Step ${idx + 1}</span>
+                <span class="font-extrabold text-sm">${w}</span>
+              </div>
+              <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-snug">${guideText}</p>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderQuickReplyButtons() {
+      const container = document.getElementById('quickReplyButtons');
+      const replies = i18n[currentLang].quickReplies || i18n.en.quickReplies;
+      container.innerHTML = replies.map(r => `
+        <button onclick="appendSignReply('${r.text.replace(/'/g, "\\'")}')" class="neon-card text-xs px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-indigo-50 font-semibold border border-slate-300 dark:border-slate-600">
+          ${r.label}
+        </button>
+      `).join('');
+    }
+
+    function appendSignReply(phrase) {
+      const box = document.getElementById('deafReplyOutput');
+      box.innerText = (box.innerText + ' ' + phrase).trim();
+      triggerVisualFlash();
+    }
+
+    function speakWord(text) {
+      if (!('speechSynthesis' in window)) {
+        document.getElementById('micStatusHint').innerText = 'Text-to-speech is not supported in this browser. The message remains available as text.';
+        return;
+      }
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      const locale = speechLocale();
+      u.lang = locale;
+      u.rate = currentLang === 'ta' || currentLang === 'zh' ? 0.88 : 0.92;
+      u.pitch = 1.0;
+      u.volume = 1.0;
+      const chooseVoice = () => {
+        const voices = window.speechSynthesis.getVoices() || [];
+        const base = locale.toLowerCase().split('-')[0];
+        const match = voices.find(v => v.lang && v.lang.toLowerCase() === locale.toLowerCase())
+          || voices.find(v => v.lang && v.lang.toLowerCase().startsWith(base + '-'))
+          || voices.find(v => v.lang && v.lang.toLowerCase() === base);
+        // Never deliberately select an English voice for Tamil, Mandarin, or Malay.
+        if (match) u.voice = match;
+        else if (currentLang === 'ta' || currentLang === 'zh' || currentLang === 'bm') {
+          document.getElementById('micStatusHint').innerText = `Your device may not have a ${locale} voice installed. The browser may use a fallback voice; install a matching system voice for more natural pronunciation.`;
+        }
+        window.speechSynthesis.speak(u);
+      };
+      if (window.speechSynthesis.getVoices().length) chooseVoice();
+      else {
+        window.speechSynthesis.onvoiceschanged = chooseVoice;
+        // Some browsers don't fire voiceschanged; still speak using the requested locale.
+        setTimeout(() => { if (window.speechSynthesis.pending === false && !window.speechSynthesis.speaking) chooseVoice(); }, 250);
+      }
+    }
+
+    function speakTranslatedText() {
+      const text = document.getElementById('deafReplyOutput').innerText.trim();
+      if (!text) return;
+      speakWord(text);
+      triggerVisualFlash();
+    }
+
+    // ================= 8. UI HELPERS (LANGUAGE, THEME, ACCESSIBILITY) =================
+    function changeLanguage(lang) {
+      currentLang = lang;
+      document.documentElement.lang = ({ en: 'en', bm: 'ms', zh: 'zh-CN', ta: 'ta' })[lang] || 'en';
+      const t = i18n[lang];
+      Object.keys(t).forEach(id => {
+        if (id === 'quickReplies') return;
+        const el = document.getElementById(id);
+        if (el) el.innerText = t[id];
+      });
+
+      document.getElementById('cat-all').innerText = t.catAll;
+      document.getElementById('cat-alphabet').innerText = t.catAlpha;
+      document.getElementById('cat-number').innerText = t.catNum;
+      document.getElementById('cat-daily').innerText = t.catDaily;
+      document.getElementById('cat-emergency').innerText = t.catEmerg;
+      document.getElementById('searchBIM').placeholder = t.searchPlaceholder;
+
+      updateAuthUI();
+      renderBIMCards();
+      renderQuickReplyButtons();
+      if (!isListening) resetMicUI();
+      translateToBIM();
+      triggerVisualFlash();
+    }
+
+    function switchTab(tab) {
+      ['learn', 'practice', 'communicate'].forEach(t => {
+        document.getElementById('tab-' + t).classList.add('hidden');
+        document.getElementById('tabBtn-' + t).className = "tab-btn py-2.5 px-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 text-slate-600 dark:text-slate-300 hover:bg-white/50";
+      });
+      document.getElementById('tab-' + tab).classList.remove('hidden');
+      document.getElementById('tabBtn-' + tab).className = "tab-btn py-2.5 px-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 bg-white dark:bg-slate-700 text-indigo-600 dark:text-amber-400 shadow-sm";
+      if (tab === 'communicate') translateToBIM();
+    }
+
+    function toggleTheme() {
+      const html = document.documentElement;
+      html.classList.toggle('dark');
+      const icon = document.getElementById('themeIcon');
+      icon.className = html.classList.contains('dark') ? 'fa-solid fa-sun' : 'fa-solid fa-moon';
+    }
+
+    function toggleModal(id) {
+      document.getElementById(id).classList.toggle('hidden');
+    }
+
+    function setFontScale(size) {
+      document.documentElement.style.fontSize = size;
+      triggerVisualFlash();
+    }
+
+    function toggleHighContrast() {
+      document.getElementById('appBody').classList.toggle('high-contrast');
+      triggerVisualFlash();
+    }
+
+    function triggerVisualFlash() {
+      const enabled = document.getElementById('visualFlashToggle')?.checked;
+      if (!enabled) return;
+      const body = document.getElementById('appBody');
+      body.classList.remove('visual-flash');
+      void body.offsetWidth;
+      body.classList.add('visual-flash');
+    }
+
+    // Initialize App
+    updateAuthUI();
+    renderBIMCards();
+    renderQuickReplyButtons();
+    translateToBIM();
+  </script>
+</body>
+</html>
